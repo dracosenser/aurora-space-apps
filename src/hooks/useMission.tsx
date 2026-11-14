@@ -86,10 +86,7 @@ export function MissionProvider({ children }: { children: ReactNode }) {
   }, [state.theme])
 
   useEffect(() => {
-    const onHash = () => {
-      console.log('[aurora] hashchange ->', window.location.hash, pageFromHash())
-      setPageState(pageFromHash())
-    }
+    const onHash = () => setPageState(pageFromHash())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
