@@ -1,18 +1,24 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
-type Variant = 'primary' | 'outline' | 'ghost' | 'danger'
+type Variant = 'primary' | 'outline' | 'ghost' | 'danger' | 'ember'
 type Size = 'sm' | 'md'
 
+/**
+ * Instrument-panel buttons: squared corners, hairline borders, no gloss.
+ * The primary action earns its weight from contrast — cool white on near-black
+ * — leaving electric blue to do its work as an accent rather than a fill.
+ */
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-accent text-[#04121a] hover:brightness-110 border-transparent font-semibold',
-  outline: 'border-border-strong bg-surface-2 text-text hover:border-accent/60 hover:text-text-strong',
-  ghost: 'border-transparent text-muted hover:bg-surface-3 hover:text-text-strong',
-  danger: 'border-danger/40 bg-danger/10 text-danger hover:bg-danger/20',
+  primary: 'border-transparent bg-text-strong font-medium text-bg hover:brightness-[1.08]',
+  outline: 'border-border-strong bg-surface-2/60 text-text hover:border-accent/55 hover:bg-surface-3/70 hover:text-text-strong',
+  ghost: 'border-transparent text-muted hover:bg-surface-3/70 hover:text-text-strong',
+  danger: 'border-danger/35 bg-danger/10 text-danger hover:bg-danger/18',
+  ember: 'border-ember/40 bg-ember/10 text-ember hover:bg-ember/18',
 }
 
 const SIZES: Record<Size, string> = {
-  sm: 'h-7 px-2.5 text-xs gap-1.5',
-  md: 'h-9 px-3.5 text-sm gap-2',
+  sm: 'h-7 px-2.5 text-[11px] gap-1.5 tracking-wide',
+  md: 'h-9 px-3.5 text-[13px] gap-2',
 }
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -25,7 +31,7 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 export function Button({ variant = 'outline', size = 'md', icon, children, className = '', ...rest }: Props) {
   return (
     <button
-      className={`inline-flex items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={`inline-flex items-center justify-center rounded-sm border transition-[background-color,border-color,color,filter] duration-200 disabled:cursor-not-allowed disabled:opacity-45 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...rest}
     >
       {icon}

@@ -15,7 +15,8 @@ export const EVENT_ICONS: Record<EventType, typeof Flag> = {
   environment: CloudFog,
 }
 
-const PHASE_COLORS = ['#3b82f6', '#22d3ee', '#3b82f6', '#f59e0b', '#3b82f6', '#22d3ee', '#34d399']
+/** Departure → transit → arrival → surface (ember, for Mars) → return → recovery. */
+const PHASE_COLORS = ['#5b86d6', '#7aa7ff', '#9ec4ff', '#ff8f52', '#9ec4ff', '#7aa7ff', '#4fd6c0']
 
 export function TimelineStrip({ events, viewDay, onSelectDay }: { events: MissionEvent[]; viewDay: number; onSelectDay?: (d: number) => void }) {
   const [hover, setHover] = useState<MissionEvent | null>(null)
@@ -25,23 +26,23 @@ export function TimelineStrip({ events, viewDay, onSelectDay }: { events: Missio
   return (
     <div>
       <div className="relative h-16">
-        {/* phases */}
-        <div className="absolute inset-x-0 top-6 flex h-3 overflow-hidden rounded-full border border-border">
+        {/* phases, ruled as a continuous band */}
+        <div className="absolute inset-x-0 top-6 flex h-[7px] overflow-hidden rounded-xs border border-border">
           {PHASES.map((p, i) => (
             <div
               key={p.id}
               title={`${p.name} (MD ${p.startDay}–${p.endDay})`}
-              style={{ width: `${((p.endDay - p.startDay + 1) / total) * 100}%`, background: PHASE_COLORS[i], opacity: p.endDay <= viewDay ? 0.85 : p.startDay <= viewDay ? 0.6 : 0.2 }}
-              className="h-full border-r border-bg/60 last:border-r-0"
+              style={{ width: `${((p.endDay - p.startDay + 1) / total) * 100}%`, background: PHASE_COLORS[i], opacity: p.endDay <= viewDay ? 0.8 : p.startDay <= viewDay ? 0.55 : 0.16 }}
+              className="h-full border-r border-bg/70 last:border-r-0"
             />
           ))}
         </div>
-        {/* future overlay */}
-        <div className="pointer-events-none absolute top-6 h-3 rounded-r-full bg-bg/50" style={{ left: pct(viewDay), right: 0 }} />
-        {/* current marker */}
-        <div className="absolute top-3 flex -translate-x-1/2 flex-col items-center" style={{ left: pct(viewDay) }}>
-          <span className="mono rounded bg-accent px-1 text-[9px] font-semibold text-[#04121a]">MD {viewDay}</span>
-          <span className="h-9 w-px bg-accent" />
+        {/* the future, held back */}
+        <div className="pointer-events-none absolute top-6 h-[7px] bg-bg/60" style={{ left: pct(viewDay), right: 0 }} />
+        {/* present-day index */}
+        <div className="absolute top-2 flex -translate-x-1/2 flex-col items-center" style={{ left: pct(viewDay) }}>
+          <span className="mono rounded-xs border border-accent/50 bg-bg px-1 py-px text-[9px] font-semibold tracking-wide text-accent">MD {viewDay}</span>
+          <span className="h-10 w-px bg-accent/70" />
         </div>
         {/* events */}
         {events.map((e) => {
@@ -50,7 +51,7 @@ export function TimelineStrip({ events, viewDay, onSelectDay }: { events: Missio
           return (
             <button
               key={e.id}
-              className={`absolute top-10 -translate-x-1/2 rounded-full border p-1 transition-transform hover:scale-110 ${past ? 'border-border-strong bg-surface-2' : 'border-border bg-surface opacity-50'}`}
+              className={`absolute top-10 -translate-x-1/2 rounded-xs border p-1 transition-transform duration-200 hover:scale-125 ${past ? 'border-border-strong bg-surface-2' : 'border-border bg-surface opacity-45'}`}
               style={{ left: pct(e.day) }}
               onMouseEnter={() => setHover(e)}
               onMouseLeave={() => setHover(null)}
@@ -71,19 +72,19 @@ export function TimelineStrip({ events, viewDay, onSelectDay }: { events: Missio
           </span>
         ))}
       </div>
-      <div className="mt-2 min-h-[44px] rounded-md border border-border bg-surface-2 px-3 py-2 text-xs">
+      <div className="mt-3 min-h-[52px] rounded-sm border border-border bg-surface-2/50 px-3.5 py-2.5 text-xs">
         {hover ? (
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={severityTone(hover.severity)}>{hover.type}</Badge>
             <span className="font-semibold text-text-strong">{hover.title}</span>
-            <span className="mono text-muted">
+            <span className="annotate">
               MD {hover.day}
-              {hover.endDay ? `–${hover.endDay}` : ''} · {fmtDate(hover.day)}
+              {hover.endDay ? `–${hover.endDay}` : ''} · {fmtDate(hover.day).toUpperCase()}
             </span>
-            <span className="w-full text-muted">{hover.description}</span>
+            <span className="w-full leading-relaxed text-muted">{hover.description}</span>
           </div>
         ) : (
-          <span className="text-muted">Hover an event marker for details. Click one to jump the mission view to that day. Future planned events appear dimmed.</span>
+          <span className="leading-relaxed text-muted">Hover an event marker for details. Click one to jump the mission view to that day. Future planned events appear dimmed.</span>
         )}
       </div>
     </div>

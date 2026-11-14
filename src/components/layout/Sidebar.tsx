@@ -1,6 +1,7 @@
 import { Activity, BookOpen, Bot, FlaskConical, LayoutDashboard, Presentation, ShieldAlert, X, type LucideIcon } from 'lucide-react'
 import type { PageId } from '../../types'
 import { useMission } from '../../hooks/useMission'
+import { Insignia } from '../visual/Insignia'
 
 export const NAV: { id: PageId; label: string; icon: LucideIcon; group: 'operations' | 'about' }[] = [
   { id: 'mission-control', label: 'Mission Control', icon: LayoutDashboard, group: 'operations' },
@@ -12,32 +13,38 @@ export const NAV: { id: PageId; label: string; icon: LucideIcon; group: 'operati
   { id: 'presentation', label: 'Space Apps Presentation', icon: Presentation, group: 'about' },
 ]
 
+/**
+ * The index of the archive. Sections are numbered like plates in a catalogue;
+ * the active one is marked with an accent rule rather than a filled block.
+ */
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { page, setPage, alerts } = useMission()
   const activeCount = alerts.filter((a) => a.active && a.severity !== 'info').length
 
   const content = (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 pt-5 pb-4">
-        <button onClick={() => setPage('mission-control')} className="flex items-center gap-2.5 text-left">
-          <Logo />
+      {/* Masthead */}
+      <div className="flex items-center justify-between gap-2 border-b border-border px-5 pb-5 pt-6">
+        <button onClick={() => setPage('mission-control')} className="group flex items-center gap-3 text-left">
+          <Insignia size={34} className="transition-transform duration-500 group-hover:rotate-[8deg]" />
           <div>
-            <p className="text-sm font-bold tracking-[0.18em] text-text-strong">AURORA</p>
-            <p className="text-[10px] leading-tight text-muted">Astronaut Health Intelligence</p>
+            <p className="display text-xl leading-none tracking-[0.06em]">AURORA</p>
+            <p className="eyebrow-sm mt-1.5">Health Intelligence</p>
           </div>
         </button>
-        <button className="rounded p-1 text-muted hover:text-text-strong lg:hidden" onClick={onClose} aria-label="Close navigation">
+        <button className="rounded-sm p-1 text-muted transition-colors hover:text-text-strong lg:hidden" onClick={onClose} aria-label="Close navigation">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      <nav className="flex-1 space-y-5 px-2">
+      <nav className="flex-1 space-y-7 overflow-y-auto px-3 py-6">
         {(['operations', 'about'] as const).map((group) => (
           <div key={group}>
-            <p className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">{group === 'operations' ? 'Operations' : 'Project'}</p>
-            <ul className="space-y-0.5">
+            <p className="eyebrow-sm mb-2.5 px-2">{group === 'operations' ? 'Operations' : 'Project'}</p>
+            <ul>
               {NAV.filter((n) => n.group === group).map((n) => {
                 const active = page === n.id
+                const index = NAV.findIndex((x) => x.id === n.id) + 1
                 return (
                   <li key={n.id}>
                     <button
@@ -45,15 +52,23 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         setPage(n.id)
                         onClose()
                       }}
-                      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-[13px] transition-colors ${
-                        active ? 'bg-accent/10 text-accent' : 'text-text hover:bg-surface-3 hover:text-text-strong'
+                      className={`group relative flex w-full items-center gap-3 rounded-sm py-2.5 pl-3 pr-2 text-left text-[13px] transition-colors duration-200 ${
+                        active ? 'bg-accent/[0.07] text-text-strong' : 'text-text hover:bg-surface-3/50 hover:text-text-strong'
                       }`}
                     >
-                      <span className={`h-4 w-0.5 rounded-full ${active ? 'bg-accent' : 'bg-transparent'}`} />
-                      <n.icon className={`h-4 w-4 ${active ? 'text-accent' : 'text-muted group-hover:text-text-strong'}`} />
-                      <span className="flex-1">{n.label}</span>
+                      {/* Active rule, drawn rather than filled */}
+                      <span
+                        className={`absolute left-0 top-1/2 h-5 w-px -translate-y-1/2 transition-all duration-300 ${
+                          active ? 'bg-accent opacity-100' : 'bg-transparent opacity-0'
+                        }`}
+                      />
+                      <span className={`mono text-[10px] tabular-nums ${active ? 'text-accent' : 'text-faint group-hover:text-muted'}`}>
+                        {String(index).padStart(2, '0')}
+                      </span>
+                      <n.icon className={`h-[15px] w-[15px] shrink-0 ${active ? 'text-accent' : 'text-muted group-hover:text-text'}`} />
+                      <span className="flex-1 leading-snug">{n.label}</span>
                       {n.id === 'early-warning' && activeCount > 0 && (
-                        <span className="mono rounded bg-danger/15 px-1.5 py-0.5 text-[10px] font-semibold text-danger">{activeCount}</span>
+                        <span className="mono rounded-xs bg-ember/15 px-1.5 py-0.5 text-[10px] font-semibold text-ember">{activeCount}</span>
                       )}
                     </button>
                   </li>
@@ -64,34 +79,30 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         ))}
       </nav>
 
-      <div className="border-t border-border px-4 py-3 text-[10px] leading-relaxed text-muted">
-        <p className="font-medium text-text">NASA Space Apps Challenge 2026</p>
-        <p>Every explorer matters. Every signal counts.</p>
-        <p className="mt-1.5 text-warn/90">All crew data shown is simulated.</p>
+      <div className="border-t border-border px-5 py-4">
+        <p className="eyebrow-sm">NASA Space Apps 2026</p>
+        <p className="display-italic mt-2 text-[13px] leading-snug text-text">
+          Every explorer matters.
+          <br />
+          Every signal counts.
+        </p>
+        <p className="annotate mt-3 text-ember">ALL CREW DATA SIMULATED</p>
       </div>
     </div>
   )
 
   return (
     <>
-      <aside className="hidden w-60 shrink-0 border-r border-border bg-surface lg:block">{content}</aside>
+      <aside className="relative z-20 hidden w-[244px] shrink-0 border-r border-border bg-surface/80 backdrop-blur-xl lg:block">{content}</aside>
       {open && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-          <aside className="absolute inset-y-0 left-0 w-64 border-r border-border bg-surface shadow-2xl">{content}</aside>
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 backdrop-blur-sm" style={{ background: 'var(--scrim)' }} onClick={onClose} />
+          <aside className="absolute inset-y-0 left-0 w-[270px] border-r border-border bg-surface shadow-2xl">{content}</aside>
         </div>
       )}
     </>
   )
 }
 
-export function Logo({ size = 32 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 64 64" className="shrink-0">
-      <rect width="64" height="64" rx="14" fill="var(--surface-3)" />
-      <circle cx="32" cy="32" r="18" fill="none" stroke="var(--accent)" strokeWidth="3" />
-      <circle cx="32" cy="32" r="6" fill="var(--accent)" />
-      <path d="M8 32h10M46 32h10M32 8v10M32 46v10" stroke="var(--accent-2)" strokeWidth="3" strokeLinecap="round" />
-    </svg>
-  )
-}
+/** Retained export: the mark is the insignia. */
+export { Insignia as Logo }

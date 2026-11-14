@@ -55,7 +55,9 @@ export function Simulator() {
   return (
     <div>
       <PageHeader
-        title="Mission What-If Simulator"
+        eyebrow="Operations · 04"
+        plate="PLATE 04"
+        title="What-If Simulator"
         description="Explore hypothetical mission scenarios. Every parameter change re-runs the model instantly and compares projected indicator trends against the baseline mission plan. Illustrative models, not validated medical predictions."
         actions={
           <Button size="sm" variant="outline" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => { setParams(DEFAULT_PARAMS); setPreset('nominal') }}>
@@ -106,7 +108,7 @@ export function Simulator() {
                 const better = mt.worseWhen === 'higher' ? d < -0.0001 : d > 0.0001
                 return (
                   <div key={mt.key} className="rounded-md border border-border bg-surface-2 p-3">
-                    <p className="truncate text-[10px] uppercase tracking-wider text-muted" title={mt.label}>{mt.label}</p>
+                    <p className="truncate eyebrow-sm" title={mt.label}>{mt.label}</p>
                     <div className="mt-1 flex items-baseline justify-between gap-2">
                       <p className="mono text-lg font-semibold text-text-strong">
                         {s.toFixed(mt.decimals)}

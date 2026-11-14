@@ -1,1 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#060b1a"/><circle cx="32" cy="32" r="18" fill="none" stroke="#22d3ee" stroke-width="3"/><circle cx="32" cy="32" r="6" fill="#22d3ee"/><path d="M8 32h10M46 32h10M32 8v10M32 46v10" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="limb" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#4d8dff" stop-opacity="0.25" />
+      <stop offset="55%" stop-color="#7fb2ff" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#eef3fa" />
+    </linearGradient>
+    <clipPath id="disc">
+      <circle cx="32" cy="32" r="29" />
+    </clipPath>
+  </defs>
+
+  <circle cx="32" cy="32" r="29" fill="#04070f" />
+
+  <!-- Planetary limb with an aurora band rising over it -->
+  <g clip-path="url(#disc)">
+    <circle cx="32" cy="63" r="30" fill="none" stroke="url(#limb)" stroke-width="4" />
+    <circle cx="32" cy="63" r="22" fill="#080c17" />
+    <path d="M4 44 Q32 28 60 44" fill="none" stroke="#ff7a35" stroke-width="1.6" opacity="0.85" />
+  </g>
+
+  <!-- Orbital ring -->
+  <ellipse
+    cx="32"
+    cy="32"
+    rx="29"
+    ry="11"
+    fill="none"
+    stroke="#4d8dff"
+    stroke-width="1.6"
+    opacity="0.55"
+    transform="rotate(-22 32 32)"
+  />
+
+  <circle cx="32" cy="32" r="29" fill="none" stroke="#9ab2d8" stroke-opacity="0.3" stroke-width="1.5" />
+  <circle cx="46.5" cy="19" r="2.4" fill="#eef3fa" />
+</svg>

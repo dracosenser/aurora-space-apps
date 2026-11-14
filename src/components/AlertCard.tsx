@@ -36,9 +36,22 @@ export function AlertCard({ alert, defaultOpen = false, compact = false }: { ale
   })()
 
   return (
-    <div className={`rounded-lg border bg-surface ${alert.active ? (alert.severity === 'caution' ? 'border-danger/40' : alert.severity === 'watch' ? 'border-warn/40' : 'border-border-strong') : 'border-border'}`}>
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-start gap-3 px-4 py-3 text-left">
-        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${alert.severity === 'caution' ? 'bg-danger' : alert.severity === 'watch' ? 'bg-warn' : 'bg-accent-2'} ${alert.active && alert.severity !== 'info' ? 'pulse' : ''}`} />
+    <div
+      className={`panel rounded-md transition-colors duration-300 ${
+        alert.active
+          ? alert.severity === 'caution'
+            ? 'border-danger/35'
+            : alert.severity === 'watch'
+              ? 'border-warn/30'
+              : 'border-border-strong'
+          : 'border-border'
+      }`}
+    >
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-start gap-3 px-4 py-3.5 text-left">
+        {/* Severity is squared, like a signal lamp on a console */}
+        <span
+          className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-xs ${alert.severity === 'caution' ? 'bg-danger' : alert.severity === 'watch' ? 'bg-warn' : 'bg-accent-2'} ${alert.active && alert.severity !== 'info' ? 'pulse' : ''}`}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-text-strong">{alert.title}</p>
@@ -103,7 +116,7 @@ export function AlertCard({ alert, defaultOpen = false, compact = false }: { ale
                 </p>
               </div>
               <div className="lg:col-span-2">
-                <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Indicator trace around the alert</p>
+                <p className="mb-1 eyebrow">Indicator trace around the alert</p>
                 {chartData.length > 0 ? (
                   <TimeSeriesChart
                     data={chartData}
@@ -139,7 +152,7 @@ export function AlertCard({ alert, defaultOpen = false, compact = false }: { ale
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">{label}</p>
+      <p className="mb-0.5 eyebrow">{label}</p>
       <div className="text-xs leading-relaxed text-text">{children}</div>
     </div>
   )

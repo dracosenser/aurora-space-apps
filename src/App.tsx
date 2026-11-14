@@ -4,6 +4,7 @@ import { useMission } from './hooks/useMission'
 import { Sidebar } from './components/layout/Sidebar'
 import { TopBar } from './components/layout/TopBar'
 import { GuidedTour } from './components/GuidedTour'
+import { Atmosphere } from './components/visual/Atmosphere'
 import { MissionControl } from './pages/MissionControl'
 
 const CrewHealth = lazy(() => import('./pages/CrewHealth').then((m) => ({ default: m.CrewHealth })))
@@ -26,14 +27,31 @@ export default function App() {
   }, [tourSeen])
 
   return (
-    <div className="flex min-h-screen">
+    <div className="grain relative flex min-h-screen">
+      {/* Deep-field backdrop, behind everything, mounted once */}
+      <Atmosphere />
+
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col">
+
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <TopBar onMenu={() => setMenuOpen(true)} onTour={() => setTourOpen(true)} />
-        <main className="flex-1 px-4 py-5 md:px-6">
-          <Suspense fallback={<div className="py-20 text-center text-sm text-muted">Loading module…</div>}>
+        <main className="mx-auto w-full max-w-[1680px] flex-1 px-4 py-5 md:px-6">
+          <Suspense
+            fallback={
+              <div className="flex flex-col items-center gap-3 py-28">
+                <span className="h-px w-16 animate-pulse bg-border-strong" />
+                <p className="eyebrow-sm">Loading module</p>
+              </div>
+            }
+          >
             <AnimatePresence mode="wait">
-              <motion.div key={page} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
+              <motion.div
+                key={page}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.34, ease: [0.16, 1, 0.3, 1] }}
+              >
                 {page === 'mission-control' && <MissionControl />}
                 {page === 'crew-health' && <CrewHealth />}
                 {page === 'early-warning' && <EarlyWarning />}
@@ -45,7 +63,16 @@ export default function App() {
             </AnimatePresence>
           </Suspense>
         </main>
+
+        <footer className="relative z-10 mt-6 border-t border-border px-4 py-5 md:px-6">
+          <div className="mx-auto flex max-w-[1680px] flex-wrap items-center gap-x-6 gap-y-2">
+            <span className="annotate">AURORA — ASTRONAUT HEALTH INTELLIGENCE</span>
+            <span className="annotate hidden sm:inline">NASA SPACE APPS CHALLENGE 2026</span>
+            <span className="annotate ml-auto text-ember">SYNTHETIC CREW DATA · NOT A NASA PRODUCT</span>
+          </div>
+        </footer>
       </div>
+
       <GuidedTour open={tourOpen} onClose={() => setTourOpen(false)} />
     </div>
   )

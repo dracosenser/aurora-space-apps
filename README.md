@@ -56,7 +56,40 @@ Extra features: historical mission playback (top-bar slider recomputes every ale
 - React 18 + Vite 6 + TypeScript (strict)
 - Tailwind CSS 4
 - Recharts, Lucide React, Framer Motion
+- Instrument Serif, IBM Plex Sans and IBM Plex Mono (Google Fonts)
 - Local data layer: seeded synthetic generator + `localStorage` for user state (no backend)
+
+---
+
+## Design system
+
+AURORA is styled as an **astronomical research archive reimagined as a mission-control
+instrument**: deep-space foundation, editorial display type, and technical annotation
+throughout. Every decorative element is drawn in code — there are no raster assets, so
+the production build carries no image weight.
+
+**Foundation.** Near-black with a midnight-blue cast (`#04070f`), charcoal-navy surfaces,
+hairline borders at low opacity, and cool-white through silver-gray type. Electric blue
+(`#4d8dff`) is the single accent; a NASA-inspired ember (`#ff7a35`) and signal red carry
+contrast and warnings. Corners are near-square throughout (1–4 px).
+
+**Three voices.** Instrument Serif for oversized editorial display (`.display`), IBM Plex
+Sans for the interface, and IBM Plex Mono for telemetry and archival annotation. Two
+utility classes carry the technical register: `.eyebrow` (letterspaced caps, as on an
+instrument panel) and `.annotate` (monospaced margin notes, as on a plate).
+
+**Atmosphere.** `components/visual/` holds the generated layers — a deterministic star
+catalogue on two parallax planes, a faint coordinate grid, film grain, and the planetary
+limb, graticules, orbital rings and insignia. `MissionHero` composes these into the
+masthead, with the planet lit from the right so the type stays legible on the left.
+
+**Two themes.** Dark is deep space. Light is *archival paper* — the same system read as a
+scanned document, with the planet rendered as a pale engraving. Both are driven entirely
+by the CSS custom properties at the top of `src/index.css`; change a token there and the
+whole application follows.
+
+**Motion** is restrained and respects `prefers-reduced-motion`: slow celestial drift,
+pointer parallax in the hero, hairlines that brighten on approach, and elegant reveals.
 
 ### Project structure
 
@@ -67,6 +100,7 @@ src/
   lib/          Pure logic: stats, anomaly rules, health scoring, simulator, assistant, report
   hooks/        MissionProvider — the local data layer and app state
   components/   Reusable UI, charts, alert cards, timeline, tour, profile modal
+    visual/     Generated atmosphere: star field, planetary limb, insignia, diagrams
   pages/        One component per section
 docs/
   METHODOLOGY.md    Scientific methodology and model equations

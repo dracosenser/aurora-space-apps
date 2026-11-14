@@ -79,7 +79,12 @@ export function CrewHealth() {
 
   return (
     <div>
-      <PageHeader title="Crew Health Analytics" description="Interactive time-series for five indicator categories. Filter by date range, inspect one crew member with alert windows and events in context, or compare the whole crew." />
+      <PageHeader
+        eyebrow="Operations · 02"
+        plate="PLATE 02"
+        title="Crew Health Analytics"
+        description="Interactive time-series for five indicator categories. Filter by date range, inspect one crew member with alert windows and events in context, or compare the whole crew."
+      />
 
       <Card flush bodyClassName="flex flex-wrap items-end gap-3 p-3">
         <Segmented
@@ -92,7 +97,7 @@ export function CrewHealth() {
         />
         {mode === 'individual' && <Select label="Astronaut" value={astro.id} onChange={(v) => m.setSelectedAstronautId(v)} options={ASTRONAUTS.map((a) => ({ value: a.id, label: `${a.name} · ${a.id}` }))} />}
         <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted">Date range</span>
+          <span className="eyebrow">Date range</span>
           <Segmented
             value={range}
             onChange={setRange}
@@ -107,13 +112,13 @@ export function CrewHealth() {
         </div>
         {range === 'custom' && (
           <div className="flex items-end gap-2">
-            <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted">
+            <label className="flex flex-col gap-1 eyebrow">
               From MD
-              <input type="number" min={1} max={m.viewDay} value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-text-strong outline-none focus:border-accent" />
+              <input type="number" min={1} max={m.viewDay} value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-sm border border-border-strong bg-surface-2/70 px-2 text-sm text-text-strong outline-none transition-colors focus:border-accent" />
             </label>
-            <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted">
+            <label className="flex flex-col gap-1 eyebrow">
               To MD
-              <input type="number" min={1} max={m.viewDay} value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-text-strong outline-none focus:border-accent" />
+              <input type="number" min={1} max={m.viewDay} value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-sm border border-border-strong bg-surface-2/70 px-2 text-sm text-text-strong outline-none transition-colors focus:border-accent" />
             </label>
           </div>
         )}
@@ -207,7 +212,7 @@ export function CrewHealth() {
       {mode === 'individual' && inRange.length > 0 && (
         <Card className="mt-5" title={`Historical trend analysis · ${astro.name}`} subtitle={`All indicators across MD ${from}–${to}. First-week vs last-week means and linear trend per 30 days.`} flush bodyClassName="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="text-left text-[10px] uppercase tracking-wider text-muted">
+            <thead className="text-left eyebrow-sm">
               <tr className="border-b border-border">
                 <th className="px-4 py-2 font-medium">Indicator</th>
                 <th className="px-3 py-2 font-medium">Pre-flight</th>

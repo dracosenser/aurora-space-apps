@@ -34,7 +34,12 @@ export function EarlyWarning() {
 
   return (
     <div>
-      <PageHeader title="Early Warning Intelligence" description="Explainable anomaly detection over every crew member's own rolling baseline. Each alert states what changed, when, which indicators are involved, why the rule fired, how confident the system is, and what to review." />
+      <PageHeader
+        eyebrow="Operations · 03"
+        plate="PLATE 03"
+        title="Early Warning Intelligence"
+        description="Explainable anomaly detection over every crew member's own rolling baseline. Each alert states what changed, when, which indicators are involved, why the rule fired, how confident the system is, and what to review."
+      />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Kpi label="Active alerts" value={active.length} tone={active.some((a) => a.severity === 'caution') ? 'danger' : active.length ? 'warn' : 'ok'} sub="as of the current view day" />
@@ -45,11 +50,11 @@ export function EarlyWarning() {
 
       <Card className="mt-4" flush bodyClassName="flex flex-wrap items-end gap-3 p-3">
         <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted">Status</span>
+          <span className="eyebrow">Status</span>
           <Segmented value={status} onChange={setStatus} options={[{ value: 'all', label: 'All' }, { value: 'active', label: 'Active' }, { value: 'resolved', label: 'Resolved' }]} />
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted">Severity</span>
+          <span className="eyebrow">Severity</span>
           <Segmented value={sev} onChange={setSev} options={[{ value: 'all', label: 'All' }, { value: 'caution', label: 'Caution' }, { value: 'watch', label: 'Watch' }, { value: 'info', label: 'Info' }]} />
         </div>
         <Select label="Crew member" value={who} onChange={setWho} options={[{ value: 'all', label: 'All crew' }, ...ASTRONAUTS.map((a) => ({ value: a.id, label: `${a.name} · ${a.id}` }))]} />

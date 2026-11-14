@@ -23,7 +23,13 @@ export function Sources() {
 
   return (
     <div>
-      <PageHeader title="Sources & Science" description="Every real NASA program, dataset, standard and peer-reviewed paper that informs AURORA, with what each represents and its limitations. Real research is kept strictly separate from the synthetic demonstration data." simulated={false} />
+      <PageHeader
+        eyebrow="Project · 06"
+        plate="PLATE 06"
+        title="Sources & Science"
+        description="Every real NASA program, dataset, standard and peer-reviewed paper that informs AURORA, with what each represents and its limitations. Real research is kept strictly separate from the synthetic demonstration data."
+        simulated={false}
+      />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2" title="Scientific methodology in brief">
@@ -59,7 +65,7 @@ export function Sources() {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-[13px] font-semibold uppercase tracking-wider text-text-strong">Source catalogue ({list.length})</h2>
+        <h2 className="eyebrow text-text-strong">Source catalogue ({list.length})</h2>
         <Segmented
           value={kind}
           onChange={setKind}
@@ -105,7 +111,7 @@ export function Sources() {
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</dt>
+      <dt className="eyebrow-sm">{label}</dt>
       <dd className="leading-relaxed text-text">{children}</dd>
     </div>
   )

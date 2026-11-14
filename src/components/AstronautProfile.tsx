@@ -30,20 +30,20 @@ export function AstronautProfile({ astronaut, onClose }: { astronaut: Astronaut;
   const delta = (k: IndicatorKey) => mean(last7.map((r) => r[k])) - mean(prior.map((r) => r[k]))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 backdrop-blur-sm sm:items-center sm:p-6" style={{ background: 'var(--scrim)' }} onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-t-xl border border-border bg-bg sm:rounded-xl"
+        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-t-md border border-border-strong bg-bg shadow-2xl sm:rounded-md"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="sticky top-0 z-10 flex items-start gap-4 border-b border-border bg-surface px-5 py-4">
+        <div className="sticky top-0 z-10 flex items-start gap-4 border-b border-border bg-surface/95 px-5 py-4 backdrop-blur-xl">
           <Avatar astronaut={astronaut} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-text-strong">{astronaut.name}</h2>
+              <h2 className="display text-2xl">{astronaut.name}</h2>
               <span className="mono text-xs text-muted">{astronaut.id}</span>
               <Badge tone={statusTone(status.status)} dot>
                 {status.status}
@@ -62,7 +62,7 @@ export function AstronautProfile({ astronaut, onClose }: { astronaut: Astronaut;
 
         <div className="space-y-5 px-5 py-5">
           <div className="rounded-lg border border-border bg-surface p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Status drivers (trailing 7 days vs pre-flight baseline)</p>
+            <p className="eyebrow">Status drivers (trailing 7 days vs pre-flight baseline)</p>
             <ul className="mt-2 flex flex-wrap gap-2">
               {status.drivers.map((d) => (
                 <li key={d} className="rounded border border-border-strong bg-surface-2 px-2 py-1 text-xs text-text">
@@ -75,7 +75,7 @@ export function AstronautProfile({ astronaut, onClose }: { astronaut: Astronaut;
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {CATEGORIES.map((cat) => (
               <div key={cat.id} className="rounded-lg border border-border bg-surface p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-text-strong">{cat.label}</p>
+                <p className="eyebrow text-text-strong">{cat.label}</p>
                 <div className="mt-3 space-y-3">
                   {indicatorsFor(cat.id).map((meta) => {
                     const vals = last30.map((r) => r[meta.key])
@@ -105,7 +105,7 @@ export function AstronautProfile({ astronaut, onClose }: { astronaut: Astronaut;
 
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-[13px] font-semibold uppercase tracking-wider text-text-strong">Alerts ({alerts.length})</p>
+              <p className="eyebrow text-text-strong">Alerts ({alerts.length})</p>
               <Button
                 size="sm"
                 variant="outline"

@@ -51,7 +51,12 @@ export function Assistant() {
 
   return (
     <div className="flex h-[calc(100vh-7.5rem)] min-h-[560px] flex-col">
-      <PageHeader title="AI Mission Assistant" description="Ask questions about the data loaded in AURORA. Answers are computed from the current mission view with the reasoning shown and facts separated from hypotheses." />
+      <PageHeader
+        eyebrow="Operations · 05"
+        plate="PLATE 05"
+        title="Mission Assistant"
+        description="Ask questions about the data loaded in AURORA. Answers are computed from the current mission view with the reasoning shown and facts separated from hypotheses."
+      />
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-4">
         <Card className="flex min-h-0 flex-col xl:col-span-3" flush bodyClassName="flex min-h-0 flex-1 flex-col">
           <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -69,8 +74,8 @@ export function Assistant() {
             {m.chat.length === 0 && (
               <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
                 <Logo size={44} />
-                <p className="text-sm font-semibold text-text-strong">How can I help with the {MISSION.name} crew data?</p>
-                <p className="max-w-md text-xs text-muted">I answer from the records, alerts and simulator state in this application. I explain my reasoning and I never diagnose. Try one of the questions on the right.</p>
+                <p className="display mt-2 text-2xl">How can I help with the {MISSION.name} crew data?</p>
+                <p className="max-w-md text-xs leading-relaxed text-muted">I answer from the records, alerts and simulator state in this application. I explain my reasoning and I never diagnose. Try one of the questions on the right.</p>
               </div>
             )}
             {m.chat.map((msg) => (
@@ -78,16 +83,16 @@ export function Assistant() {
             ))}
             {thinking && (
               <div className="flex items-start gap-3">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/15 text-accent">
+                <div className="flex h-7 w-7 items-center justify-center rounded-sm border border-accent/25 bg-accent/10 text-accent">
                   <Bot className="h-4 w-4" />
                 </div>
-                <div className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs text-muted">Computing over mission data…</div>
+                <div className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-xs text-muted"><span className="pulse">Computing over mission data…</span></div>
               </div>
             )}
             <div ref={endRef} />
           </div>
           <form onSubmit={onSubmit} className="flex items-center gap-2 border-t border-border p-3">
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about crew health, alerts, radiation, the mission, or the simulator…" className="h-10 flex-1 rounded-md border border-border-strong bg-surface-2 px-3 text-sm text-text-strong outline-none placeholder:text-muted focus:border-accent" aria-label="Question" />
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about crew health, alerts, radiation, the mission, or the simulator…" className="h-10 flex-1 rounded-sm border border-border-strong bg-surface-2/70 px-3 text-sm text-text-strong outline-none transition-colors placeholder:text-muted focus:border-accent" aria-label="Question" />
             <Button type="submit" variant="primary" icon={<Send className="h-4 w-4" />} disabled={!input.trim() || thinking}>
               Ask
             </Button>

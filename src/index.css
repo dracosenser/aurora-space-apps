@@ -1,7 +1,15 @@
 @import 'tailwindcss';
 
+/* ============================================================================
+   AURORA — ARCHIVAL VISUAL SYSTEM
+   An astronomical research archive reimagined as a mission-control instrument.
+   Foundation: near-black / midnight navy. Voice: engraved serif display,
+   technical letterspaced caps, monospaced telemetry. Light: archival paper.
+   ========================================================================= */
+
 @theme inline {
   --color-bg: var(--bg);
+  --color-bg-deep: var(--bg-deep);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
@@ -10,54 +18,128 @@
   --color-text: var(--text);
   --color-text-strong: var(--text-strong);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-accent: var(--accent);
   --color-accent-2: var(--accent-2);
+  --color-ember: var(--ember);
+  --color-signal: var(--signal);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
+
+  --font-display: 'Instrument Serif', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Minimal, instrument-like corners throughout */
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 8px;
 }
 
+/* ---------------------------------------------------------------- tokens */
+
 :root {
-  --bg: #05080f;
-  --surface: #0a1020;
-  --surface-2: #0f172e;
-  --surface-3: #16213d;
-  --border: #1a2744;
-  --border-strong: #27365c;
-  --text: #cdd7e8;
-  --text-strong: #f1f5fb;
-  --muted: #7f8fae;
-  --accent: #22d3ee;
-  --accent-2: #3b82f6;
-  --ok: #34d399;
-  --warn: #fbbf24;
-  --danger: #f87171;
-  --grid: rgba(125, 150, 200, 0.12);
-  --tooltip-bg: #0f172e;
+  /* Deep space foundation — almost-black with a midnight-blue cast */
+  --bg-deep: #02040a;
+  --bg: #04070f;
+  --surface: #080c17;
+  --surface-2: #0c1220;
+  --surface-3: #121a2b;
+
+  /* Thin, low-opacity hairlines rather than solid strokes */
+  --border: rgba(148, 170, 206, 0.11);
+  --border-strong: rgba(154, 178, 216, 0.2);
+
+  /* Cool white → silver-gray type ramp */
+  --text: #b9c6da;
+  --text-strong: #eef3fa;
+  --muted: #76859e;
+  --faint: #4a5872;
+
+  /* Selective electric blue, with NASA-inspired ember and signal red */
+  --accent: #4d8dff;
+  --accent-2: #7fb2ff;
+  --ember: #ff7a35;
+  --signal: #e5484d;
+
+  --ok: #3ecf8e;
+  --warn: #f0a93b;
+  --danger: #ef5a5f;
+
+  --grid: rgba(128, 156, 204, 0.085);
+  --grid-fine: rgba(128, 156, 204, 0.05);
+  --tooltip-bg: rgba(10, 16, 28, 0.97);
+  --halo: rgba(77, 141, 255, 0.5);
+
+  --grain-opacity: 0.042;
+  --star-opacity: 1;
+  --scrim: rgba(2, 4, 10, 0.72);
+
+  /* The planetary body in the masthead: lit limb through to night side */
+  --planet-lit: #31486f;
+  --planet-mid: #1b2a45;
+  --planet-dark: #0c1526;
+  --planet-deep: #05080f;
+  --planet-shadow: #02040a;
+  --planet-mottle: #0a1526;
+  --planet-haze-outer: 0.52;
+  --planet-haze-inner: 0.85;
+
   color-scheme: dark;
 }
 
+/* Archival paper — the same system read as a scanned document */
 :root[data-theme='light'] {
-  --bg: #eef2f8;
-  --surface: #ffffff;
-  --surface-2: #f4f7fb;
-  --surface-3: #e7edf6;
-  --border: #d5deeb;
-  --border-strong: #b9c6da;
-  --text: #2a3650;
-  --text-strong: #0b1426;
-  --muted: #627394;
-  --accent: #0e7490;
+  --bg-deep: #e3e0d8;
+  --bg: #edeae3;
+  --surface: #faf8f4;
+  --surface-2: #f3f0e9;
+  --surface-3: #e8e4da;
+
+  --border: rgba(40, 46, 62, 0.14);
+  --border-strong: rgba(40, 46, 62, 0.26);
+
+  --text: #343c4e;
+  --text-strong: #12161f;
+  --muted: #6b7382;
+  --faint: #8d94a1;
+
+  --accent: #1d4ed8;
   --accent-2: #2563eb;
-  --ok: #059669;
-  --warn: #d97706;
-  --danger: #dc2626;
-  --grid: rgba(60, 80, 120, 0.14);
-  --tooltip-bg: #ffffff;
+  --ember: #c2410c;
+  --signal: #b91c1c;
+
+  --ok: #047857;
+  --warn: #b45309;
+  --danger: #b91c1c;
+
+  --grid: rgba(40, 55, 85, 0.1);
+  --grid-fine: rgba(40, 55, 85, 0.055);
+  --tooltip-bg: rgba(250, 248, 244, 0.98);
+  --halo: rgba(29, 78, 216, 0.3);
+
+  --grain-opacity: 0.05;
+  --star-opacity: 0;
+  --scrim: rgba(237, 234, 227, 0.78);
+
+  /* On paper the same body reads as an engraved plate: ink on warm stock */
+  --planet-lit: #fcfbf8;
+  --planet-mid: #e8e4da;
+  --planet-dark: #d6d0c2;
+  --planet-deep: #c6bfae;
+  --planet-shadow: #9b9484;
+  --planet-mottle: #ddd8cb;
+  --planet-haze-outer: 0.16;
+  --planet-haze-inner: 0.3;
+
   color-scheme: light;
 }
+
+/* ------------------------------------------------------------------ base */
 
 html,
 body,
@@ -65,20 +147,42 @@ body,
   height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
+  font-feature-settings: 'cv05' 1, 'ss01' 1;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  overflow-x: hidden;
 }
 
+/* Layered deep-space atmosphere: faint nebular glows over a near-black field */
 :root:not([data-theme='light']) body {
   background-image:
-    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(34, 211, 238, 0.07), transparent 60%),
-    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(59, 130, 246, 0.06), transparent 60%);
+    radial-gradient(ellipse 70% 46% at 14% -8%, rgba(60, 110, 220, 0.1), transparent 62%),
+    radial-gradient(ellipse 56% 38% at 92% 2%, rgba(94, 140, 255, 0.07), transparent 60%),
+    radial-gradient(ellipse 90% 50% at 50% 112%, rgba(255, 122, 53, 0.045), transparent 64%),
+    linear-gradient(180deg, var(--bg-deep) 0%, var(--bg) 38%, var(--bg) 100%);
   background-attachment: fixed;
+}
+
+:root[data-theme='light'] body {
+  background-image:
+    radial-gradient(ellipse 70% 44% at 16% -6%, rgba(29, 78, 216, 0.05), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 94% 4%, rgba(194, 65, 12, 0.035), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(77, 141, 255, 0.28);
+  color: var(--text-strong);
 }
 
 * {
@@ -86,18 +190,255 @@ body {
   scrollbar-color: var(--border-strong) transparent;
 }
 
-::selection {
-  background: rgba(34, 211, 238, 0.3);
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
 }
 
-.mono {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 99px;
 }
 
-.tabular {
-  font-variant-numeric: tabular-nums;
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
+
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------ typography */
+/* These live in the components layer so that any Tailwind utility — a colour,
+   a size — still overrides them at the call site. */
+
+@layer components {
+  /* Engraved editorial display — the voice of the archive */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    line-height: 0.94;
+    color: var(--text-strong);
+  }
+
+  .display-italic {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    line-height: 1.12;
+  }
+
+  /* Technical plate label — letterspaced caps, as on an instrument panel */
+  .eyebrow {
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+
+  .eyebrow-sm {
+    font-family: var(--font-sans);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    line-height: 1.4;
+    color: var(--faint);
+  }
+
+  /* Archival annotation — the margin note of a technical plate */
+  .annotate {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    line-height: 1.5;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* --------------------------------------------------------- texture layers */
+
+/* Film grain — fractal noise, screened over everything, barely perceptible */
+.grain::after {
+  content: '';
+  position: fixed;
+  inset: -50%;
+  z-index: 60;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain-shift 7s steps(6) infinite;
+}
+
+@keyframes grain-shift {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-3%, 2%); }
+  40% { transform: translate(2%, -3%); }
+  60% { transform: translate(-2%, -2%); }
+  80% { transform: translate(3%, 1%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* Coordinate grid — the faint ruling of an astronomical plate */
+.plate-grid {
+  background-image:
+    linear-gradient(to right, var(--grid-fine) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-fine) 1px, transparent 1px);
+  background-size: 96px 96px;
+}
+
+.plate-grid-fine {
+  background-image:
+    linear-gradient(to right, var(--grid-fine) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-fine) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Halftone — the dot screen of a reprinted archival photograph */
+.halftone {
+  background-image: radial-gradient(circle at center, var(--grid) 0.6px, transparent 0.7px);
+  background-size: 4px 4px;
+}
+
+.vignette {
+  box-shadow: inset 0 0 160px 40px var(--bg);
+}
+
+/* ------------------------------------------------------------- surfaces */
+
+/* Archival panel: hairline border, faint inner light at the top edge */
+@layer components {
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    position: relative;
+  }
+}
+
+:root:not([data-theme='light']) .panel {
+  box-shadow:
+    inset 0 1px 0 0 rgba(190, 212, 255, 0.045),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Registration ticks at the corners, like a plate ready for printing */
+.ticked::before,
+.ticked::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.ticked::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
+}
+
+.ticked::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+}
+
+.hairline-t {
+  border-top: 1px solid var(--border);
+}
+
+.hairline-b {
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---------------------------------------------------------------- motion */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.pulse {
+  animation: pulse-dot 2.4s ease-in-out infinite;
+}
+
+/* Slow celestial drift for ambient star layers */
+@keyframes drift-slow {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-40px, 22px, 0); }
+}
+
+@keyframes drift-slower {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(26px, -16px, 0); }
+}
+
+.drift-a { animation: drift-slow 150s linear infinite alternate; }
+.drift-b { animation: drift-slower 220s linear infinite alternate; }
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes rotate-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.orbit-slow { animation: rotate-slow 190s linear infinite; }
+.orbit-rev { animation: rotate-slow 280s linear infinite reverse; }
+
+/* Elegant reveal — content rises into place as the plate settles */
+@keyframes reveal-up {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+.reveal {
+  animation: reveal-up 0.72s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* A slow sweep of light across the horizon, like a terminator line */
+@keyframes sweep {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(220%); }
+}
+
+.sweep {
+  animation: sweep 14s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ----------------------------------------------------------------- charts */
 
 .recharts-cartesian-grid line {
   stroke: var(--grid);
@@ -105,62 +446,77 @@ body {
 
 .recharts-text {
   fill: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-family: var(--font-mono);
+  letter-spacing: 0.06em;
 }
 
 .recharts-default-legend {
   color: var(--text);
 }
 
+.recharts-cartesian-axis-line {
+  stroke: var(--border-strong);
+}
+
+/* ---------------------------------------------------------------- inputs */
+
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 4px;
+  height: 2px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--fill, 50%), var(--border-strong) var(--fill, 50%), var(--border-strong) 100%);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--fill, 50%),
+    var(--border-strong) var(--fill, 50%),
+    var(--border-strong) 100%
+  );
   outline: none;
 }
 
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   background: var(--text-strong);
-  border: 2px solid var(--accent);
+  border: 1px solid var(--accent);
   cursor: pointer;
-  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.15);
+  box-shadow: 0 0 0 4px rgba(77, 141, 255, 0.14);
+  transition: box-shadow 0.2s ease;
+}
+
+input[type='range']:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 6px rgba(77, 141, 255, 0.2);
 }
 
 input[type='range']::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--text-strong);
-  border: 2px solid var(--accent);
+  border: 1px solid var(--accent);
   cursor: pointer;
 }
 
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
+select option {
+  background: var(--surface-2);
+  color: var(--text-strong);
 }
 
-.pulse {
-  animation: pulse-dot 1.8s ease-in-out infinite;
-}
+/* ----------------------------------------------------------------- print */
 
 @media print {
   aside,
-  header {
+  header,
+  .no-print {
     display: none !important;
+  }
+  body {
+    background: #fff;
   }
 }

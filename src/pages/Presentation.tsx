@@ -3,31 +3,54 @@ import { Activity, ArrowRight, Bot, BookOpen, FlaskConical, Lightbulb, Orbit, Sh
 import { useMission } from '../hooks/useMission'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
-import { Logo } from '../components/layout/Sidebar'
+import { MissionPatch } from '../components/visual/Insignia'
+import { LocalStars } from '../components/visual/Atmosphere'
 
 export function Presentation() {
   const m = useMission()
   return (
     <div className="mx-auto max-w-5xl">
-      {/* Hero */}
-      <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden rounded-xl border border-border bg-surface px-6 py-10 md:px-10 md:py-14">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full border border-accent/20" />
-        <div className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full border border-accent/10" />
-        <div className="flex items-center gap-3">
-          <Logo size={40} />
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">NASA Space Apps Challenge 2026</span>
+      {/* Title plate */}
+      <motion.section
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="panel ticked relative overflow-hidden rounded-md px-6 py-10 md:px-10 md:py-14"
+      >
+        <LocalStars seed={31415} count={60} />
+        <div className="plate-grid pointer-events-none absolute inset-0 opacity-50" />
+
+        {/* The patch, set in the right margin */}
+        <div className="pointer-events-none absolute -right-10 top-1/2 hidden -translate-y-1/2 opacity-70 lg:block">
+          <MissionPatch size={260} />
         </div>
-        <h1 className="mt-5 text-3xl font-bold tracking-tight text-text-strong md:text-5xl">AURORA</h1>
-        <p className="mt-1 text-sm text-muted md:text-base">Autonomous Understanding of Risk, Observation & Astronaut Resilience</p>
-        <p className="mt-6 max-w-2xl text-lg font-medium leading-snug text-text-strong md:text-2xl">“Because every explorer matters. Every signal counts.”</p>
-        <p className="mt-4 max-w-2xl text-sm leading-relaxed text-text">An astronaut health-intelligence platform for lunar and Mars missions: continuous multivariable monitoring, explainable early warning, interactive what-if simulation and a data-grounded assistant, built on NASA's open human-research foundation.</p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Button variant="primary" icon={<ArrowRight className="h-4 w-4" />} onClick={() => m.setPage('mission-control')}>
-            Open the live demo
-          </Button>
-          <Button variant="outline" icon={<BookOpen className="h-4 w-4" />} onClick={() => m.setPage('sources')}>
-            Sources & science
-          </Button>
+
+        <div className="relative max-w-2xl">
+          <div className="flex items-center gap-3">
+            <span className="eyebrow text-accent">NASA Space Apps Challenge 2026</span>
+          </div>
+
+          <h1 className="display mt-5 text-[clamp(3rem,9vw,5.5rem)]">AURORA</h1>
+          <p className="eyebrow-sm mt-3">Autonomous Understanding of Risk, Observation &amp; Astronaut Resilience</p>
+
+          <p className="display-italic mt-7 text-[clamp(1.3rem,3vw,2.1rem)] text-text-strong">
+            “Because every explorer matters. Every signal counts.”
+          </p>
+
+          <p className="mt-5 text-pretty text-sm leading-relaxed text-text">
+            An astronaut health-intelligence platform for lunar and Mars missions: continuous multivariable monitoring,
+            explainable early warning, interactive what-if simulation and a data-grounded assistant, built on NASA's open
+            human-research foundation.
+          </p>
+
+          <div className="mt-8 flex flex-wrap gap-2">
+            <Button variant="primary" icon={<ArrowRight className="h-4 w-4" />} onClick={() => m.setPage('mission-control')}>
+              Open the live demo
+            </Button>
+            <Button variant="outline" icon={<BookOpen className="h-4 w-4" />} onClick={() => m.setPage('sources')}>
+              Sources &amp; science
+            </Button>
+          </div>
         </div>
       </motion.section>
 
@@ -125,7 +148,7 @@ function Section({ icon: Icon, title, children, accent, className = '' }: { icon
     <section className={`rounded-lg border border-border bg-surface p-5 ${className}`}>
       <div className="flex items-center gap-2">
         <Icon className={`h-4 w-4 ${color}`} />
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-text-strong">{title}</h2>
+        <h2 className="eyebrow text-text-strong">{title}</h2>
       </div>
       <div className="mt-3 space-y-2 text-xs leading-relaxed text-text">{children}</div>
     </section>
