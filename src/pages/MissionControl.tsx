@@ -54,8 +54,6 @@ export function MissionControl() {
     return rows
   }, [m.records, m.viewDay, trendKey])
 
-  const recentEvents = EVENTS.filter((e) => e.day <= m.viewDay).slice(-5).reverse()
-  const nextEvent = EVENTS.find((e) => e.day > m.viewDay)
   const profileAstro = ASTRONAUTS.find((a) => a.id === profile)
 
   return (

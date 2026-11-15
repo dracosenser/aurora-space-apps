@@ -95,9 +95,9 @@ export function Pill({ children }: { children: ReactNode }) {
 export function RuledHeading({ children, note }: { children: ReactNode; note?: ReactNode }) {
   return (
     <div className="mb-4 flex items-center gap-4">
-      <h2 className="eyebrow shrink-0 text-text-strong">{children}</h2>
+      <h2 className="eyebrow min-w-0 shrink text-text-strong">{children}</h2>
       <span className="h-px flex-1 bg-border" />
-      {note && <span className="annotate shrink-0">{note}</span>}
+      {note && <span className="annotate hidden shrink-0 sm:inline">{note}</span>}
     </div>
   )
 }

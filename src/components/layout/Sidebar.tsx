@@ -1,10 +1,11 @@
-import { Activity, BookOpen, Bot, FlaskConical, LayoutDashboard, Presentation, ShieldAlert, X, type LucideIcon } from 'lucide-react'
+import { Activity, BookOpen, Bot, FlaskConical, HeartPulse, LayoutDashboard, Presentation, ShieldAlert, X, type LucideIcon } from 'lucide-react'
 import type { PageId } from '../../types'
 import { useMission } from '../../hooks/useMission'
 import { Insignia } from '../visual/Insignia'
 
 export const NAV: { id: PageId; label: string; icon: LucideIcon; group: 'operations' | 'about' }[] = [
   { id: 'mission-control', label: 'Mission Control', icon: LayoutDashboard, group: 'operations' },
+  { id: 'self-check', label: 'Self-Assessment', icon: HeartPulse, group: 'operations' },
   { id: 'crew-health', label: 'Crew Health Analytics', icon: Activity, group: 'operations' },
   { id: 'early-warning', label: 'Early Warning', icon: ShieldAlert, group: 'operations' },
   { id: 'simulator', label: 'What-If Simulator', icon: FlaskConical, group: 'operations' },

@@ -5,6 +5,8 @@ import { EVENTS, MISSION } from '../data/mission'
 import { generateMissionRecords } from '../data/generator'
 import { detectAnomalies } from '../lib/anomaly'
 import { computeStatus, crewScore, type AstronautStatus } from '../lib/health'
+import { EMPTY_LOG, batteryComplete, newlyEarned, pointsForReading, type CrewLog } from '../lib/gamify'
+import type { CheckId } from '../data/selfcheck'
 
 /**
  * Lightweight local data layer. Synthetic records are generated once from a
@@ -21,6 +23,8 @@ interface PersistedState {
   lastScenario: ScenarioParams | null
   chat: AssistantMessage[]
   tourSeen: boolean
+  /** The crew member's own self-assessment log and protocol board. */
+  log: CrewLog
 }
 
 const DEFAULT_STATE: PersistedState = {
@@ -30,6 +34,7 @@ const DEFAULT_STATE: PersistedState = {
   lastScenario: null,
   chat: [],
   tourSeen: false,
+  log: EMPTY_LOG,
 }
 
 function loadState(): PersistedState {
@@ -37,7 +42,12 @@ function loadState(): PersistedState {
     const raw = localStorage.getItem(LS_KEY)
     if (!raw) return DEFAULT_STATE
     const parsed = JSON.parse(raw) as Partial<PersistedState>
-    return { ...DEFAULT_STATE, ...parsed, viewDay: Math.min(MISSION.currentDay, Math.max(45, parsed.viewDay ?? MISSION.currentDay)) }
+    return {
+      ...DEFAULT_STATE,
+      ...parsed,
+      log: { ...EMPTY_LOG, ...(parsed.log ?? {}) },
+      viewDay: Math.min(MISSION.currentDay, Math.max(45, parsed.viewDay ?? MISSION.currentDay)),
+    }
   } catch {
     return DEFAULT_STATE
   }
@@ -57,6 +67,12 @@ export interface MissionState extends PersistedState {
   setLastScenario: (p: ScenarioParams | null) => void
   setChat: (fn: (prev: AssistantMessage[]) => AssistantMessage[]) => void
   setTourSeen: (v: boolean) => void
+  /** Record a self-taken reading for the current mission day. */
+  logReading: (id: CheckId, value: number) => void
+  /** Mark a protocol cleared for the current mission day. */
+  clearProtocol: (id: string) => void
+  /** Open a fresh duty period, restarting the countdown. */
+  openPeriod: () => void
   resetDemo: () => void
   isLive: boolean
 }
@@ -119,6 +135,53 @@ export function MissionProvider({ children }: { children: ReactNode }) {
     setLastScenario: (p) => setState((s) => ({ ...s, lastScenario: p })),
     setChat: (fn) => setState((s) => ({ ...s, chat: fn(s.chat).slice(-60) })),
     setTourSeen: (v) => setState((s) => ({ ...s, tourSeen: v })),
+
+    logReading: (id, raw) =>
+      setState((s) => {
+        const day = s.viewDay
+        const value = Number(raw)
+        if (!Number.isFinite(value)) return s
+        const at = Date.now()
+
+        const readings = [...s.log.readings.filter((r) => !(r.id === id && r.day === day)), { id, value, day, at }]
+        let next: CrewLog = { ...s.log, readings, points: s.log.points + pointsForReading(id, value) }
+
+        // Completing the battery advances the streak exactly once per day
+        if (batteryComplete(next, day) && next.lastBatteryDay !== day) {
+          const consecutive = next.lastBatteryDay === day - 1
+          next = {
+            ...next,
+            lastBatteryDay: day,
+            batteriesLogged: next.batteriesLogged + 1,
+            streak: consecutive ? next.streak + 1 : 1,
+            points: next.points + 50,
+            cleared: { ...next.cleared, battery: day },
+          }
+        }
+
+        const earned = newlyEarned(next, day)
+        if (earned.length) next = { ...next, patches: [...next.patches, ...earned], points: next.points + earned.length * 40 }
+        if (!next.periodOpenedAt) next = { ...next, periodOpenedAt: at }
+        return { ...s, log: next }
+      }),
+
+    clearProtocol: (id) =>
+      setState((s) => {
+        const day = s.viewDay
+        if (s.log.cleared[id] === day) return s
+        const pts = { battery: 50, resistive: 35, aerobic: 25, hydration: 15, shelter: 30, conference: 20 }[id] ?? 10
+        let next: CrewLog = {
+          ...s.log,
+          cleared: { ...s.log.cleared, [id]: day },
+          points: s.log.points + pts,
+          periodOpenedAt: s.log.periodOpenedAt || Date.now(),
+        }
+        const earned = newlyEarned(next, day)
+        if (earned.length) next = { ...next, patches: [...next.patches, ...earned], points: next.points + earned.length * 40 }
+        return { ...s, log: next }
+      }),
+
+    openPeriod: () => setState((s) => ({ ...s, log: { ...s.log, periodOpenedAt: Date.now() } })),
     resetDemo: () => {
       try {
         localStorage.removeItem(LS_KEY)

@@ -28,12 +28,22 @@
   --color-ink: var(--ink);
   --color-ink-soft: var(--ink-soft);
   --color-rust: var(--rust);
+  --color-info: var(--info-cyan);
+  --color-live: var(--screen-glow);
+  --color-alert: var(--alert-amber);
+  --color-slate: var(--slate);
   --color-accent: var(--accent);
   --color-accent-2: var(--accent-2);
   --color-ember: var(--ember);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
+
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --dur-enter: 240ms;
+  --dur-exit: 180ms;
+  --stagger: 30ms;
 
   --font-display: 'Newsreader', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -86,9 +96,18 @@
   --rust: #a8512c;
 
   /* Status, desaturated into the same stock */
-  --ok: #869b81;
-  --warn: #c09a5b;
-  --danger: #b4695e;
+  /* SEMANTIC AXIS (NASApunk console grammar, held at matte saturation):
+     the cyan family marks passive data and live values; amber marks alerts,
+     actions and interactive state — never decoration. */
+  --info-cyan: #6f93a3;
+  --screen-glow: #7fae9a;
+  --alert-amber: #c89248;
+  --danger-red: #c2564e;
+  --slate: #35444a;
+
+  --ok: #7fae9a;
+  --warn: #c89248;
+  --danger: #c2564e;
 
   --grid: rgba(229, 226, 218, 0.055);
   --grid-fine: rgba(229, 226, 218, 0.035);
@@ -136,7 +155,13 @@
   --ink-soft: #4a463c;
   --rust: #a8512c;
 
-  --ok: #5b6f57;
+  --info-cyan: #3f6678;
+  --screen-glow: #3d6b57;
+  --alert-amber: #8a6626;
+  --danger-red: #8e4238;
+  --slate: #35444a;
+
+  --ok: #3d6b57;
   --warn: #8a6626;
   --danger: #8e4238;
 
@@ -429,6 +454,23 @@ body::before {
   opacity: 0.5;
 }
 
+/* Hazard stripe — marks a genuine warning edge, never ornament */
+.hazard-stripe {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--ink) 0 10px,
+    var(--alert-amber) 10px 20px
+  );
+  opacity: 0.85;
+}
+
+/* Rivet row — the fastening edge of a panel */
+.rivets {
+  background-image: radial-gradient(circle at center, var(--border-strong) 1.1px, transparent 1.2px);
+  background-size: 18px 18px;
+  background-repeat: repeat-x;
+}
+
 /* ---------------------------------------------------------------- motion */
 
 @keyframes pulse-dot {
@@ -449,6 +491,27 @@ body::before {
 .reveal {
   animation: reveal-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/* The ONLY sanctioned attention loop: 2.5s sine breathe. Never a blink. */
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.breathe {
+  animation: breathe 2.5s ease-in-out infinite;
+}
+
+/* List entrances stagger by --stagger, per the motion language */
+.stagger > * {
+  animation: reveal-up var(--dur-enter) var(--ease-out) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: calc(var(--stagger) * 1); }
+.stagger > *:nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
+.stagger > *:nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
+.stagger > *:nth-child(5) { animation-delay: calc(var(--stagger) * 4); }
+.stagger > *:nth-child(6) { animation-delay: calc(var(--stagger) * 5); }
 
 @keyframes fade-in {
   from { opacity: 0; }
@@ -528,6 +591,14 @@ input[type='range']::-moz-range-thumb {
 select option {
   background: var(--surface-2);
   color: var(--text-strong);
+}
+
+/* A rail that scrolls without advertising it */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* ----------------------------------------------------------------- print */

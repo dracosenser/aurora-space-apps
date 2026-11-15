@@ -40,6 +40,7 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 
 | Section | Purpose |
 |---|---|
+| **Self-Assessment** | The crew member's own station. Eight readings taken and entered by hand, each with how to take it, why it matters in spaceflight, a reference band drawn to scale and a written action for the band it lands in. A clickable human figure opens five body systems. Duty-period countdown, readiness instrument, protocols and mission patches |
 | **Mission Control** | Mission elapsed time, phase, crew size, crew composite status, individual astronaut cards with sparklines, 90-day crew trend chart, recent alerts, interactive mission timeline, event log, optional live NASA space-weather feed |
 | **Crew Health Analytics** | Five categories (cardiovascular, sleep, physical, radiation, behavioral), 15 indicators, date-range presets and custom ranges, individual vs crew comparison, alert windows and mission events drawn on charts, 7-day smoothing, historical trend table |
 | **Early Warning Intelligence** | Explainable rule-based anomaly detection. Each alert shows what changed, when, which indicators, why it fired, confidence with rationale, and what to review. Filters by status, severity and crew member |
@@ -49,6 +50,33 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 | **Space Apps Presentation** | Problem, relevance, how it works, NASA contribution, innovation, limitations and future work |
 
 Extra features: historical mission playback (top-bar slider recomputes every alert and score for any past day), astronaut profile pages, exportable Markdown mission health report, dark/light mode, guided demo tour, demo reset button, responsive layout.
+
+### The self-assessment loop
+
+The challenge asks for software an astronaut uses on themselves, so this page is
+built around a crew member who has no clinician in the room and must decide what
+to do next. It is a loop, not a dashboard:
+
+1. **A duty period opens.** A fifteen-minute window counts down on real time.
+   When it expires the strip turns amber and breathes, and readiness holds at the
+   last complete battery rather than silently decaying.
+2. **Eight readings are entered by hand** — blood pressure, heart rate, SpO₂,
+   core temperature, blood glucose, sleep and mood. Nothing on the page is sensed
+   automatically, which is the honest version of a self-assessment tool.
+3. **Each reading is placed against its reference band**, drawn to scale so the
+   value's position is visible rather than asserted, and classified nominal /
+   watch / action.
+4. **The band produces a written instruction.** Never a diagnosis, never a
+   treatment — retake in an hour, log an accompanying symptom, or contact the
+   flight surgeon. Every escalation routes to the flight surgeon, which is what
+   the real protocol does.
+5. **Readiness, streaks, points and patches** close the loop. Completing a full
+   battery extends the streak; seven patches mark things actually achieved
+   (first complete battery, a clean sweep, a steady run) rather than participation.
+
+Points are an **engagement score for a simulation**, labelled as such on the page.
+They are not a health score, and the page says so where a user would otherwise
+assume otherwise.
 
 ---
 
@@ -100,6 +128,32 @@ Sans for the interface, IBM Plex Mono for telemetry, catalogue numbers and every
 annotation on a drawing. `.eyebrow` sets stencilled caps; `.annotate` sets margin
 notes. Sections are numbered as plates, figures and drawings.
 
+**Colour carries one meaning each.** Instrument colour is on a semantic axis, not a
+palette: desaturated cyan (`--info-cyan`) is passive data and never means "good";
+sage (`--screen-glow`) is nominal; amber (`--alert-amber`) is the only colour that
+asks for an action; red (`--danger-red`) is reserved for a threshold crossed.
+Because colour is load-bearing, every status also carries a shape — a filled tick,
+a hollow square, a word — so the page survives being read in greyscale or by
+someone who cannot separate the two warm hues.
+
+**The two instruments** are drawn, not charted:
+
+- **`ThreeRing`** — the readiness dial. An outer scale ring, a value track and an
+  inner figure, each reading at a different distance so the eye lands on the number
+  first and the context second.
+- **`BodyFigure`** — the clickable human figure the challenge asks for, drawn as
+  line work in a 200 × 380 field. Five systems are hit regions that fill with their
+  current status and run leader lines out to a margin index, the way a labelled
+  plate in a textbook does. Selecting a system shows what it does, what happens to
+  it in long-duration flight, which of the five hazards drive it, the readings that
+  bear on it and the countermeasures flown against it.
+
+**Motion has a tempo.** 2.5s for the one sanctioned attention loop (`.breathe`,
+used only where something genuinely needs an answer), 240ms for entrances, 30ms of
+stagger between siblings, and nothing under 500ms that repeats. There are no
+bounces and no spring overshoot; everything eases on a single curve
+(`--ease-out`). All of it respects `prefers-reduced-motion`.
+
 **Texture.** Paper fibre on the page (`body::before`), film grain over the frame
 (`.grain`), a halftone screen on every photograph, a stipple screen on the
 blueprint, and reticle crosses on survey frames — all generated from CSS and
@@ -131,9 +185,10 @@ src/
   types/        Domain types (records, alerts, scenarios, sources)
   data/         Mission, crew, events, synthetic generator, scenario presets, sources
   lib/          Pure logic: stats, anomaly rules, health scoring, simulator, assistant, report
+                gamify.ts — protocols, patches, readiness, streaks, duty periods
   hooks/        MissionProvider — the local data layer and app state
-  components/   Reusable UI, charts, alert cards, timeline, tour, profile modal
-    visual/     Blueprint, plotting chart, contact sheet, plates, insignia
+  components/   Reusable UI, charts, alert cards, tour, profile modal
+    visual/     Blueprint, plotting chart, contact sheet, body figure, three-ring, insignia
   pages/        One component per section
 docs/
   METHODOLOGY.md    Scientific methodology and model equations
@@ -155,6 +210,8 @@ The data layer (`src/data`, `src/lib`) has no React dependency and can be unit-t
 - Every crew value, event, alert and simulator curve is **simulated**. The UI marks this on every page.
 - Magnitudes in the generator and simulator are **informed by** published spaceflight research (MSL/RAD radiation measurements, ISS sleep actigraphy, bone and muscle studies, NASA-STD-3001 exposure limits). See `docs/METHODOLOGY.md` and `docs/DATA_SOURCES.md`.
 - Anomalies are statistical deviations from a crew member's own baseline. **They are not diagnoses.**
+- The reference bands on the self-assessment page are **general adult reference values used to drive a demonstration**. They are not clinical thresholds, they are not personalised, and no action text recommends a treatment — every escalation routes to the flight surgeon. This is stated in `src/data/selfcheck.ts` and on the page itself.
+- Points, streaks and patches are an **engagement score for a simulation**, not a health score.
 - The simulator is an illustrative first-order model, not a validated medical prediction.
 - AURORA has no NASA partnership or endorsement. The optional space-weather panel calls NASA's public DONKI API with the rate-limited `DEMO_KEY` and is clearly separated from the simulated mission.
 

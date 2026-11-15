@@ -208,6 +208,7 @@ export interface AssistantMessage {
 
 export type PageId =
   | 'mission-control'
+  | 'self-check'
   | 'crew-health'
   | 'early-warning'
   | 'simulator'
