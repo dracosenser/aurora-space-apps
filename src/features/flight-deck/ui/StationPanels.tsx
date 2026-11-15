@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowUpRight, Radio, Thermometer } from 'lucide-react'
+import { ArrowUpRight, ChevronLeft, ChevronRight, FlaskConical, Radio, Thermometer } from 'lucide-react'
 import { useMission, ASTRONAUTS, EVENTS, MISSION } from '../../../hooks/useMission'
+import { INDICATORS } from '../../../lib/indicators'
+import { TimeSeriesChart } from '../../../components/charts/TimeSeriesChart'
+import type { IndicatorKey } from '../../../types'
 import { phaseForDay } from '../../../data/mission'
 import { runScenario, DEFAULT_PARAMS, RADIATION_SCENARIOS } from '../../../lib/simulator'
 import type { RadiationScenario, ScenarioParams } from '../../../types'
@@ -82,25 +85,89 @@ function Navigation() {
 }
 
 // ---------------------------------------------------------------- medical
+/**
+ * The medical console.
+ *
+ * Selecting a field opens it here, on the console itself, rather than sending
+ * the visitor out of the station to a page. That was the point of walking to
+ * the bay. The underlying chart and indicator definitions are the application's
+ * own; the console is another surface for them, not a second copy.
+ */
+type MedView = 'overview' | IndicatorKey
+
 function Medical({ onLeave, onTask }: { onLeave: (page: 'signal-veil' | 'crew-health' | 'early-warning') => void; onTask: (t: TaskId) => void }) {
   const m = useMission()
+  const [view, setView] = useState<MedView>('overview')
   const a = ASTRONAUTS.find((x) => x.id === m.selectedAstronautId) ?? ASTRONAUTS[0]
-  const rec = useMemo(
-    () => [...m.visibleRecords].reverse().find((r) => r.astronautId === a.id),
-    [m.visibleRecords, a.id],
-  )
+  const theirs = useMemo(() => m.visibleRecords.filter((r) => r.astronautId === a.id), [m.visibleRecords, a.id])
+  const rec = theirs[theirs.length - 1]
   const theirAlerts = m.alerts.filter((al) => al.active && al.astronautIds.includes(a.id))
 
-  // Reading a crew member's measurements is the objective, so it completes
-  // only once there is actually a record on screen for them.
   useEffect(() => {
     if (rec) onTask('read-vitals')
   }, [rec, onTask])
-  // The visor records its own progress on the shared log; tracing a supported
-  // relationship there is what closes that objective, wherever it was done.
   useEffect(() => {
     if (m.log.veil.includes('foundSupported')) onTask('veil-connect')
   }, [m.log.veil, onTask])
+
+  // The fields the console can open, each a real indicator the engine tracks.
+  const FIELDS: IndicatorKey[] = ['restingHR', 'hrv', 'systolicBP', 'sleepDuration', 'sleepQuality', 'stress']
+
+  if (view !== 'overview') {
+    const meta = INDICATORS[view]
+    const data = theirs.map((r) => ({ day: r.day, value: (r as unknown as Record<string, number>)[view] }))
+    const recent = data.slice(-28)
+    const base = data.slice(0, 30).reduce((t, d) => t + (d.value ?? 0), 0) / Math.max(1, data.slice(0, 30).length)
+    const now = recent[recent.length - 1]?.value
+    return (
+      <div>
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setView('overview')}
+            className="mono flex items-center gap-1.5 border border-white/20 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/65 transition-colors hover:border-white/45 hover:text-white"
+          >
+            <ChevronLeft className="h-3 w-3" /> Back
+          </button>
+          <div>
+            <p className="mono text-[10px] uppercase tracking-[0.2em] text-cyan-200/70">{a.name}</p>
+            <p className="text-[15px] text-white/90">{meta.label}</p>
+          </div>
+          <span className="annotate ml-auto text-white/35">MD {m.viewDay}</span>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-8">
+            <div className="border border-white/10 bg-black/30 p-2">
+              <TimeSeriesChart
+                data={data as Record<string, number | null | undefined>[]}
+                series={[{ key: 'value', label: meta.shortLabel, color: 'var(--accent)', width: 1.5 }]}
+                unit={meta.unit}
+                height={210}
+                decimals={meta.decimals}
+                showDate={false}
+              />
+            </div>
+          </div>
+          <div className="lg:col-span-4">
+            <Row label="Current" value={now != null ? `${now.toFixed(meta.decimals)} ${meta.unit}` : '—'} />
+            <Row label="Personal baseline" value={`${base.toFixed(meta.decimals)} ${meta.unit}`} />
+            <Row
+              label="Change"
+              value={now != null && base ? `${now > base ? '+' : ''}${(((now - base) / base) * 100).toFixed(1)}%` : '—'}
+              tone={now != null && base && Math.abs((now - base) / base) > 0.08 ? 'alert' : 'ok'}
+            />
+            <Row label="Records" value={`${data.length}`} />
+            <Row label="Category" value={meta.category} />
+            <p className="mt-3 text-[11px] leading-relaxed text-white/45">{meta.description}</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-white/40">
+              Baseline is this crew member's own early-mission mean, not a population range. A
+              change here is a deviation from their own history and nothing more.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="grid gap-5 md:grid-cols-2">
@@ -125,26 +192,43 @@ function Medical({ onLeave, onTask }: { onLeave: (page: 'signal-veil' | 'crew-he
         </div>
         <Row label="Name" value={a.name} />
         <Row label="Role" value={a.role} />
-        {rec ? (
-          <>
-            <Row label="Resting HR" value={`${rec.restingHR.toFixed(0)} bpm`} />
-            <Row label="HRV" value={`${rec.hrv.toFixed(0)} ms`} />
-            <Row label="Sleep" value={`${rec.sleepDuration.toFixed(1)} h`} />
-            <Row label="Blood pressure" value={`${rec.systolicBP.toFixed(0)}/${rec.diastolicBP.toFixed(0)}`} />
-          </>
-        ) : (
-          <Row label="Readings" value="No record for this day" />
-        )}
+
+        <p className="mono mb-1 mt-4 text-[10.5px] uppercase tracking-[0.18em] text-white/40">
+          Measurements — select one to open it
+        </p>
+        <div className="grid gap-px bg-white/10">
+          {FIELDS.map((k) => {
+            const meta = INDICATORS[k]
+            const v = rec ? (rec as unknown as Record<string, number>)[k] : undefined
+            return (
+              <button
+                key={k}
+                onClick={() => {
+                  setView(k)
+                  onTask('read-trends')
+                }}
+                className="flex items-center justify-between gap-3 bg-neutral-950 px-2.5 py-2 text-left transition-colors hover:bg-neutral-900"
+              >
+                <span className="mono text-[10.5px] uppercase tracking-[0.16em] text-white/45">{meta.shortLabel}</span>
+                <span className="mono text-[12.5px] text-white/85">
+                  {v != null ? `${v.toFixed(meta.decimals)} ${meta.unit}` : '—'}
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-white/35" />
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div>
         <Row
           label="Open anomalies"
           value={theirAlerts.length ? `${theirAlerts.length}` : 'None'}
           tone={theirAlerts.length ? 'alert' : 'ok'}
         />
-      </div>
-      <div>
         {theirAlerts.length > 0 && (
           <>
-            <p className="mono mb-2 text-[10.5px] uppercase tracking-[0.18em] text-amber-300/70">Flagged for review</p>
+            <p className="mono mb-2 mt-3 text-[10.5px] uppercase tracking-[0.18em] text-amber-300/70">Flagged for review</p>
             <ul className="mb-4 space-y-2">
               {theirAlerts.slice(0, 3).map((al) => (
                 <li
@@ -162,8 +246,8 @@ function Medical({ onLeave, onTask }: { onLeave: (page: 'signal-veil' | 'crew-he
           </>
         )}
         <p className="mb-3 text-[12px] leading-relaxed text-white/45">
-          The instruments below are the same ones on the main interface, opened on{' '}
-          {a.name.split(' ')[0]}. Leaving the deck keeps your selection.
+          The visor runs on {a.name.split(' ')[0]}'s own record. It opens as a full page because
+          it needs the whole screen to work.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -174,15 +258,6 @@ function Medical({ onLeave, onTask }: { onLeave: (page: 'signal-veil' | 'crew-he
             icon={<ArrowUpRight className="h-3.5 w-3.5" />}
           >
             Open Signal Veil
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              onTask('read-trends')
-              onLeave('crew-health')
-            }}
-          >
-            Crew health
           </Button>
           <Button variant="outline" onClick={() => onLeave('early-warning')}>
             Early warning
@@ -427,6 +502,70 @@ function Comms() {
   )
 }
 
+// -------------------------------------------------------------- research
+/**
+ * The laboratory console. Everything here is read from the application's own
+ * state: the indicator set the engine tracks, what it has currently flagged,
+ * and how far the visitor has got with the visor. Nothing is invented, and no
+ * experiment is claimed that the simulation does not run.
+ */
+function Research({ onLeave, onTask }: { onLeave: (page: 'signal-veil' | 'early-warning') => void; onTask: (t: TaskId) => void }) {
+  const m = useMission()
+  const open = m.alerts.filter((a) => a.active)
+  const bySeverity = (sev: string) => open.filter((a) => a.severity === sev).length
+  const phase = phaseForDay(m.viewDay)
+  const veilDone = m.log.veil.length
+
+  useEffect(() => {
+    if (open.length >= 0) onTask('read-engine')
+  }, [open.length, onTask])
+
+  return (
+    <div className="grid gap-5 md:grid-cols-2">
+      <div>
+        <p className="mono mb-2 flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.18em] text-white/40">
+          <FlaskConical className="h-3 w-3" /> Constellation Engine
+        </p>
+        <Row label="Indicators tracked" value={`${Object.keys(INDICATORS).length}`} />
+        <Row label="Baseline method" value="Rolling median, robust deviation" />
+        <Row label="Records in window" value={`${m.visibleRecords.length}`} />
+        <Row label="Mission phase" value={phase?.name ?? '—'} />
+        <Row label="Runs" value="Entirely in this browser" />
+        <p className="mt-3 text-[11.5px] leading-relaxed text-white/45">
+          The engine compares each crew member against their own history rather than a
+          population range, then asks whether several indicators moved together, persisted and
+          are jointly unusual. It reports when the evidence does not support a relationship,
+          which is most of the time.
+        </p>
+      </div>
+
+      <div>
+        <p className="mono mb-2 text-[10.5px] uppercase tracking-[0.18em] text-white/40">Currently flagged</p>
+        <Row label="Action" value={`${bySeverity('critical') + bySeverity('caution')}`} tone={bySeverity('critical') + bySeverity('caution') ? 'alert' : 'ok'} />
+        <Row label="Watch" value={`${bySeverity('watch')}`} />
+        <Row label="Informational" value={`${bySeverity('info')}`} />
+        <div className="mt-4 border-t border-white/12 pt-3">
+          <p className="mono mb-1.5 text-[10.5px] uppercase tracking-[0.18em] text-white/40">Signal Veil</p>
+          <Row label="Steps worked" value={`${veilDone} of 9`} />
+          <Row label="Mission score" value={`${m.log.points} pts`} />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button onClick={() => { onTask('open-veil'); onLeave('signal-veil') }} icon={<ArrowUpRight className="h-3.5 w-3.5" />}>
+            Open Signal Veil
+          </Button>
+          <Button variant="outline" onClick={() => onLeave('early-warning')}>
+            Early warning
+          </Button>
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-white/40">
+          Synthetic mission data throughout. No experiment aboard this station is real and no
+          finding here is clinical.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export function StationContent({
   id,
   onLeave,
@@ -440,5 +579,6 @@ export function StationContent({
   if (id === 'medical') return <Medical onLeave={onLeave} onTask={onTask} />
   if (id === 'crew') return <Crew onTask={onTask} />
   if (id === 'environment') return <Environment onLeave={onLeave} onTask={onTask} />
+  if (id === 'research') return <Research onLeave={onLeave} onTask={onTask} />
   return <Comms />
 }

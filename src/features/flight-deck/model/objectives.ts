@@ -27,6 +27,8 @@ export type TaskId =
   | 'change-scenario'
   | 'open-navigation'
   | 'open-comms'
+  | 'open-research'
+  | 'read-engine'
 
 export interface Task {
   id: TaskId
@@ -86,6 +88,17 @@ export const OBJECTIVES: Objective[] = [
     tasks: [
       { id: 'open-environment', label: 'Open environmental control', at: 'environment' },
       { id: 'change-scenario', label: 'Change a mission scenario parameter', at: 'environment' },
+    ],
+  },
+  {
+    id: 'research',
+    code: 'OBJ-06',
+    title: 'Laboratory review',
+    brief:
+      'The engine is the reason any of this is more than a chart. Open the laboratory console and read what it is tracking and what it has flagged.',
+    tasks: [
+      { id: 'open-research', label: 'Open the laboratory console', at: 'research' },
+      { id: 'read-engine', label: "Review the engine's current findings", at: 'research' },
     ],
   },
   {

@@ -12,16 +12,31 @@
  * through window panes, it is low frequency, and a crew member looking out of
  * the cupola cannot tell the difference between it and the full-resolution
  * version at arm's length from the glass.
+ *
+ * Resolution is expressed as a fraction of the display's OWN pixels, not of a
+ * capped device-pixel ratio. The earlier form multiplied a dpr cap by a scale,
+ * which on a retina panel left even the top preset rendering 80 per cent of
+ * native and the rest closer to half, upscaled by the compositor. That was
+ * measured, and it was the whole of the blur: multisampling cannot sharpen an
+ * image that is stretched after it is drawn.
  */
 
 export type QualityName = 'low' | 'medium' | 'high'
 
 export interface Quality {
   name: QualityName
-  /** Device pixels per CSS pixel, before the governor trims it further. */
-  maxDpr: number
-  /** Fraction of the frame buffer the interior is rendered at. */
-  renderScale: number
+  /**
+   * Fraction of the display's own pixels to render. 1 means native: one
+   * rendered pixel per physical pixel, which is the only way thin structural
+   * edges and console text come out sharp on a high-density screen.
+   */
+  nativeFraction: number
+  /**
+   * Absolute ceiling on buffer pixels. Native resolution on a 4K or 5K panel
+   * is more fill than this shader can carry, so beyond this the fraction is
+   * reduced to fit rather than letting the frame rate collapse.
+   */
+  maxPixels: number
   /** Fraction of the interior's resolution the planet is rendered at. */
   skyScale: number
   /** Shadow map edge, in texels. 0 disables the sun shadow entirely. */
@@ -37,8 +52,8 @@ export interface Quality {
 export const QUALITY: Record<QualityName, Quality> = {
   low: {
     name: 'low',
-    maxDpr: 1,
-    renderScale: 0.62,
+    nativeFraction: 0.66,
+    maxPixels: 1_100_000,
     skyScale: 0.4,
     shadowSize: 0,
     pcf: 1,
@@ -47,8 +62,8 @@ export const QUALITY: Record<QualityName, Quality> = {
   },
   medium: {
     name: 'medium',
-    maxDpr: 1.25,
-    renderScale: 0.82,
+    nativeFraction: 0.85,
+    maxPixels: 2_400_000,
     skyScale: 0.55,
     shadowSize: 1024,
     pcf: 1,
@@ -57,8 +72,8 @@ export const QUALITY: Record<QualityName, Quality> = {
   },
   high: {
     name: 'high',
-    maxDpr: 1.6,
-    renderScale: 1,
+    nativeFraction: 1,
+    maxPixels: 5_000_000,
     skyScale: 0.7,
     shadowSize: 2048,
     pcf: 9,

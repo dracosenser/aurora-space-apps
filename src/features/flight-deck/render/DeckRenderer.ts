@@ -16,21 +16,52 @@ export interface DeckFrame {
 const FOV = (70 * Math.PI) / 180
 
 /**
- * Sunlight direction, pointing from the scene toward the sun.
+ * The orbit.
  *
- * The geometry here is the real constraint. The cupola looks at the planet, so
- * a sun placed beyond the cupola would sit behind the planet and leave the
- * whole disc in darkness. On the station the sun is off to one side instead,
- * which is what gives the cupola view its terminator. So the sun is high to
- * port and only slightly forward: the planet is lit with a terminator across
- * it, and enough light still comes through the port panes to throw the window
- * pattern across the command module deck.
+ * The station is treated as holding a fixed attitude with the planet off the
+ * bow and below, which is what the cupola looks at. What moves is the sun: once
+ * per orbit it swings from the station's zenith, down past the beam, behind the
+ * planet, and back. That single rotation gives the whole day/night cycle —
+ * full daylight, a terminator sweeping across the disc with light grazing in
+ * through the cupola panes, then night with the cabin lit only by its own
+ * fixtures and city lights passing below.
+ *
+ * A real low orbit is about 92 minutes. That is far too slow to show anyone, so
+ * time is compressed to ORBIT_SECONDS and labelled as compressed wherever it is
+ * surfaced. No ephemeris, no real trajectory, and the station's position over
+ * the ground is not modelled.
  */
-const SUN: [number, number, number] = (() => {
-  const v: [number, number, number] = [-0.70, 0.66, 0.27]
-  const l = Math.hypot(v[0], v[1], v[2])
+export const ORBIT_SECONDS = 210
+
+/** Unit vector from the station toward the planet's centre. */
+const EARTH_DIR: [number, number, number] = [0, -0.62, 0.785]
+/** Station zenith: straight up, away from the planet. */
+const ZENITH: [number, number, number] = [-EARTH_DIR[0], -EARTH_DIR[1], -EARTH_DIR[2]]
+/** The orbital direction, perpendicular to the zenith. */
+const ALONG: [number, number, number] = [1, 0, 0]
+
+/** Sun direction at an orbital phase, pointing from the station toward the sun. */
+function sunAt(phase: number): [number, number, number] {
+  const c = Math.cos(phase)
+  const sn = Math.sin(phase)
+  const v: [number, number, number] = [
+    ZENITH[0] * c + ALONG[0] * sn,
+    ZENITH[1] * c + ALONG[1] * sn,
+    ZENITH[2] * c + ALONG[2] * sn,
+  ]
+  const l = Math.hypot(v[0], v[1], v[2]) || 1
   return [v[0] / l, v[1] / l, v[2] / l]
-})()
+}
+
+/**
+ * How much of the sun the station itself sees, 0 at full night. Used to fade
+ * the interior sunlight out as the vessel crosses into the planet's shadow.
+ */
+function daylight(phase: number): number {
+  const s = sunAt(phase)
+  const d = s[0] * ZENITH[0] + s[1] * ZENITH[1] + s[2] * ZENITH[2]
+  return Math.max(0, Math.min(1, (d + 0.12) / 0.5))
+}
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string, label: string): WebGLShader {
   const sh = gl.createShader(type)
@@ -86,6 +117,8 @@ export class DeckRenderer {
   private emisCount: number
   private lost = false
   private shadowDrawn = false
+  /** Orbital phase the shadow map was last drawn for. */
+  private shadowPhase = -99
   private q: Quality = QUALITY.high
   private shadowSize = 0
   /** Set when the cupola is outside the view: the planet pass is then skipped. */
@@ -195,10 +228,21 @@ export class DeckRenderer {
     return this.q
   }
 
-  /** Device pixels this preset wants for a given CSS size. */
+  /**
+   * Backing-store size for a given CSS size: a fraction of the display's own
+   * pixels, reduced further only if that would exceed the preset's ceiling.
+   */
   bufferSize(cssW: number, cssH: number, dpr: number): [number, number] {
-    const s = Math.min(dpr, this.q.maxDpr) * this.q.renderScale
-    return [Math.max(1, Math.round(cssW * s)), Math.max(1, Math.round(cssH * s))]
+    const f = this.q.nativeFraction
+    let w = cssW * dpr * f
+    let h = cssH * dpr * f
+    const total = w * h
+    if (total > this.q.maxPixels) {
+      const k = Math.sqrt(this.q.maxPixels / total)
+      w *= k
+      h *= k
+    }
+    return [Math.max(1, Math.round(w)), Math.max(1, Math.round(h))]
   }
 
   private setupShadow(): void {
@@ -228,10 +272,10 @@ export class DeckRenderer {
   }
 
   /** The sun only reaches the command module, so the map covers that volume. */
-  private computeLightMatrix(): void {
+  private computeLightMatrix(sun: [number, number, number] = sunAt(0)): void {
     const cmd = ROOMS[1]
     const target: [number, number, number] = [CUPOLA.x, 1.3, cmd.z0 + 2]
-    const eye: [number, number, number] = [target[0] + SUN[0] * 18, target[1] + SUN[1] * 18, target[2] + SUN[2] * 18]
+    const eye: [number, number, number] = [target[0] + sun[0] * 18, target[1] + sun[1] * 18, target[2] + sun[2] * 18]
     const lv = lookAt(eye, target, [0, 1, 0])
     const lp = orthographic(-8.5, 8.5, -5.5, 5.5, 0.5, 42)
     multiply(lp, lv, this.lightViewProj)
@@ -314,7 +358,7 @@ export class DeckRenderer {
     return ang < half + Math.asin(Math.min(1, (CUPOLA.radius * 1.4) / dist)) + 0.12
   }
 
-  /** The structure and the sun never move, so the map is drawn once. */
+  /** Redrawn whenever the sun has moved far enough to matter. */
   private drawShadow(): void {
     const gl = this.gl
     if (!this.shadowFbo) return
@@ -335,7 +379,19 @@ export class DeckRenderer {
     const w = gl.drawingBufferWidth
     const h = gl.drawingBufferHeight
     if (w === 0 || h === 0) return
-    if (!this.shadowDrawn) this.drawShadow()
+    // Where the sun is this frame, and whether the station is in daylight.
+    const phase = (f.time / ORBIT_SECONDS) * Math.PI * 2
+    const sun = sunAt(phase)
+    const day = daylight(phase)
+
+    // The shadow map follows the sun, but it does not need to be redrawn every
+    // frame: a couple of degrees of movement is invisible in a soft shadow, and
+    // at this orbital rate that is roughly one depth pass a second.
+    if (!this.shadowDrawn || Math.abs(phase - this.shadowPhase) > 0.03) {
+      this.computeLightMatrix(sun)
+      this.drawShadow()
+      this.shadowPhase = phase
+    }
     const aspect = w / h
 
     gl.viewport(0, 0, w, h)
@@ -372,10 +428,10 @@ export class DeckRenderer {
     // Units of 1000 km. The planet sits off the bow and below, so looking
     // forward through the cupola puts the limb across the upper panes and the
     // ground across the lower ones, which is the cupola view.
-    gl.uniform3f(su.uEarthDir, 0.0, -0.62, 0.785)
+    gl.uniform3f(su.uEarthDir, EARTH_DIR[0], EARTH_DIR[1], EARTH_DIR[2])
     gl.uniform1f(su.uEarthDist, 6.79)
     gl.uniform1f(su.uEarthR, 6.371)
-    gl.uniform3f(su.uSunDir, SUN[0], SUN[1], SUN[2])
+    gl.uniform3f(su.uSunDir, sun[0], sun[1], sun[2])
     gl.uniform1i(su.uOct, this.q.planetOctaves)
     gl.drawArrays(gl.TRIANGLES, 0, 3)
     }
@@ -392,10 +448,15 @@ export class DeckRenderer {
     gl.uniform1i(cu.uLightCount, this.lightCount)
     gl.uniform3f(cu.uEye, f.eye[0], f.eye[1], f.eye[2])
     gl.uniform1f(cu.uAlert, f.alert)
-    gl.uniform3f(cu.uSunDir, SUN[0], SUN[1], SUN[2])
+    gl.uniform3f(cu.uSunDir, sun[0], sun[1], sun[2])
     if (this.shadowSize === 0) gl.uniform3f(cu.uSunCol, 0, 0, 0)
-    else gl.uniform3f(cu.uSunCol, 3.4, 3.26, 3.0)
-    const tint = this.shadowSize === 0 ? 0.26 : 0.09
+    else gl.uniform3f(cu.uSunCol, 3.4 * day, 3.26 * day, 3.0 * day)
+    // Light bouncing off the planet and in through the cupola. It follows the
+    // lit fraction of the disc rather than the station's own daylight, so the
+    // cabin keeps a faint blue wash right up to the terminator and only goes
+    // to the fixtures alone once the ground below is dark too.
+    const base = this.shadowSize === 0 ? 0.26 : 0.09
+    const tint = base * (0.18 + 0.82 * day)
     gl.uniform3f(cu.uEarthTint, tint, tint * 1.65, tint * 2.6)
     gl.uniform3f(cu.uCupola, CUPOLA.x, CUPOLA.y, CUPOLA.z)
     gl.uniform1f(cu.uShadowTexel, 1 / Math.max(1, this.shadowSize))

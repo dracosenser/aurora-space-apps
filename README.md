@@ -40,7 +40,7 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 | Section | Purpose |
 |---|---|
 | **Self-Assessment** | The crew member's own station. Eight readings taken and entered by hand, each with how to take it, why it matters in spaceflight, a reference band drawn to scale and a written action for the band it lands in. A clickable human figure opens five body systems. Duty-period countdown, readiness instrument, protocols and mission patches |
-| **Flight Deck** | An orbital research station, in first person. Five pressurised modules off a central spine, built to ISS US-segment proportions — rack bays, peach hatch collars, handrails, gridded deck panels — and a seven-pane cupola looking down at Earth. Five live consoles. WebGL2, no engine, no model files, no new dependencies |
+| **Flight Deck** | An orbital research station, in first person. Eight pressurised modules over a 43 m spine, built to ISS US-segment proportions — rack bays, peach hatch collars, handrails, gridded deck panels — and a seven-pane cupola looking down at Earth. Five live consoles. WebGL2, no engine, no model files, no new dependencies |
 | **Signal Veil** | The signature instrument, now a page of the application rather than a separate demo. A fogged EVA visor you wipe clear to reveal one crew member's health signals as a constellation, driven by the Constellation Engine. Inspect a signal, draw a connection, scrub the mission timeline, replay how a pattern developed, record a response. Runs on the app's own crew records, with a crew switcher |
 | **Mission Control** | Mission elapsed time, phase, crew size, crew composite status, individual astronaut cards with sparklines, 90-day crew trend chart, recent alerts, interactive mission timeline, event log, optional live NASA space-weather feed |
 | **Crew Health Analytics** | Five categories (cardiovascular, sleep, physical, radiation, behavioral), 15 indicators, date-range presets and custom ranges, individual vs crew comparison, alert windows and mission events drawn on charts, 7-day smoothing, historical trend table |
@@ -109,13 +109,30 @@ support, so the ship shows no distance travelled and the cabin figures are fixed
 nominal values rather than a simulated atmosphere. A control that moved a number
 without moving a model would have been worse than showing none.
 
+**The orbit.** The station holds a fixed attitude with the planet off the bow,
+and the sun swings once per orbit from zenith, past the beam, behind the planet
+and back. That one rotation gives the whole cycle: daylight, a terminator
+sweeping the disc with light grazing in through the cupola panes, then night
+with the cabin on its own fixtures and city lights passing below. A real low
+orbit is about 92 minutes; this is compressed to 210 seconds and labelled as
+compressed. There is no ephemeris and no real trajectory. The shadow map
+follows the sun, redrawn only when it has moved a couple of degrees.
+
+**Resolution.** Presets are a fraction of the display's own pixels, with an
+absolute ceiling so a 5K panel does not ask for more fill than the shader can
+carry. An earlier form multiplied a device-pixel-ratio cap by a scale factor,
+which on a retina screen left even the top preset at 80 per cent of native and
+the rest near half, upscaled by the compositor — that was measured, and it was
+the whole of the blur. Multisampling cannot sharpen an image stretched after it
+is drawn. High is now native, Medium 85 per cent, Low 66 per cent.
+
 **Reading a console.** Activating one flies the camera onto its screen over
 about six tenths of a second and opens that screen's content in place, framed
 inside the canvas rather than as a dialog over the page. Stepping back flies
 the camera out to exactly where you were standing. Movement is locked for the
 duration, so the two cannot fight.
 
-**Mission objectives.** Five objectives, each needing more than one real action:
+**Mission objectives.** Six objectives, each needing more than one real action:
 opening a console never completes one on its own. Tasks are marked by the
 actions themselves — selecting a crew member, reading a trend, moving a
 scenario parameter, tracing a relationship in the visor — and a test asserts

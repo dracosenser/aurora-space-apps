@@ -12,8 +12,11 @@ import { OBJECTIVES, currentObjective, loadProgress, objectiveDone, saveProgress
 import { StationContent } from './ui/StationPanels'
 
 const EYE = 1.62
-const WALK = 3.2
-const RUN = 5.6
+// Walking and sprinting speeds, in metres per second. Raised by exactly 5%
+// over the original 3.2 and 5.6: these are the only speed terms in the loop,
+// and dt scales them, so nothing else is multiplied twice.
+const WALK = 3.2 * 1.05
+const RUN = 5.6 * 1.05
 const RADIUS = 0.42
 const LOOK = 0.0022
 /** How long the camera takes to settle onto a console screen, and back. */
@@ -619,6 +622,7 @@ function StationModal({
     if (id === 'environment') onTask('open-environment')
     if (id === 'navigation') onTask('open-navigation')
     if (id === 'comms') onTask('open-comms')
+    if (id === 'research') onTask('open-research')
   }, [id, onTask])
 
   const frame = zoomed

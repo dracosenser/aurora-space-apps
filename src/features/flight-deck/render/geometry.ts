@@ -490,6 +490,7 @@ export function buildStructure(): MeshData {
   cupola(b)
 
   for (const s of STATIONS) workstation(b, s.x, s.z, s.facing, s.width)
+  sleepStations(b)
 
   const mesh = b.data()
   orientFaces(mesh)
@@ -548,6 +549,40 @@ function orientFaces(mesh: MeshData): void {
     flipped++
   }
   if (flipped) console.info(`[flight-deck] oriented ${flipped} faces toward the cabin`)
+}
+
+/**
+ * Crew sleep stations, after the ISS crew quarters: upright padded racks about
+ * the size of a phone box, set into the wall of the crew module with a folded
+ * sleeping bag inside and a reading light above. Four of them, one per crew
+ * member on the roster.
+ */
+function sleepStations(b: Builder): void {
+  const crew = ROOMS.find((r) => r.id === 'crew')
+  if (!crew) return
+  const wall = crew.x0 + 0.1
+  const W = 0.95
+  const D = 0.82
+  const H = 2.0
+  for (let i = 0; i < 4; i++) {
+    const z0 = crew.z0 + 0.7 + i * (W + 0.28)
+    const z1 = z0 + W
+    // Carcass: back, sides, top, and the lip of the opening.
+    b.quad([wall, 0.08, z0], [wall, H, z0], [wall, H, z1], [wall, 0.08, z1], PANEL_2, M_PANEL)
+    b.quad([wall, 0.08, z0], [wall + D, 0.08, z0], [wall + D, H, z0], [wall, H, z0], PANEL, M_PANEL)
+    b.quad([wall, H, z1], [wall + D, H, z1], [wall + D, 0.08, z1], [wall, 0.08, z1], PANEL, M_PANEL)
+    b.quad([wall, H, z0], [wall + D, H, z0], [wall + D, H, z1], [wall, H, z1], PANEL_2, M_PANEL)
+    b.box(wall + D - 0.06, 0.08, z0 - 0.05, wall + D + 0.02, H + 0.05, z1 + 0.05, ALLOY, M_METAL)
+    // Sleeping bag, strapped upright against the back wall.
+    b.box(wall + 0.1, 0.35, z0 + 0.14, wall + 0.42, 1.78, z1 - 0.14, BAG, M_SOFT)
+    for (const y of [0.75, 1.35]) {
+      b.box(wall + 0.08, y, z0 + 0.1, wall + 0.46, y + 0.025, z1 - 0.1, CABLE, M_RUBBER)
+    }
+    // Personal stowage below, a reading light and a label above.
+    b.box(wall + 0.1, 0.1, z0 + 0.12, wall + 0.55, 0.32, z1 - 0.12, BAG_2, M_SOFT)
+    b.box(wall + 0.12, H - 0.16, z0 + 0.3, wall + 0.46, H - 0.1, z1 - 0.3, ALLOY, M_METAL)
+    b.quad([wall + D - 0.05, 1.86, z0 + 0.2], [wall + D - 0.05, 1.95, z0 + 0.2], [wall + D - 0.05, 1.95, z0 + 0.62], [wall + D - 0.05, 1.86, z0 + 0.62], LABEL, M_SOFT)
+  }
 }
 
 /**

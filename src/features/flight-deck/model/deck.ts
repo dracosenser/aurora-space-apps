@@ -30,7 +30,7 @@ export interface Room {
   along?: 'x' | 'z'
 }
 
-export type StationId = 'navigation' | 'medical' | 'crew' | 'environment' | 'comms'
+export type StationId = 'navigation' | 'medical' | 'crew' | 'environment' | 'comms' | 'research'
 
 export interface Station {
   id: StationId
@@ -56,12 +56,14 @@ export interface Station {
  * as a corridor in a building.
  */
 export const ROOMS: Room[] = [
-  { id: 'spine', label: 'Spine corridor', x0: -2.3, x1: 2.3, z0: -16, z1: 15, height: 2.75 },
+  { id: 'spine', label: 'Spine corridor', x0: -2.3, x1: 2.3, z0: -28.5, z1: 15, height: 2.75 },
   { id: 'command', label: 'Command module', x0: -5.6, x1: 5.6, z0: 15, z1: 23.5, height: 3.3, along: 'z' },
   { id: 'medical', label: 'Medical bay', x0: 2.3, x1: 8.4, z0: 4.6, z1: 11.4, height: 2.75 },
   { id: 'crew', label: 'Crew quarters', x0: -8.4, x1: -2.3, z0: 4.6, z1: 11.4, height: 2.75 },
   { id: 'environment', label: 'Environmental control', x0: 2.3, x1: 8.4, z0: -12.4, z1: -5.6, height: 2.75 },
   { id: 'comms', label: 'Communications', x0: -8.4, x1: -2.3, z0: -12.4, z1: -5.6, height: 2.75 },
+  { id: 'research', label: 'Research module', x0: 2.3, x1: 9.2, z0: -25.6, z1: -17.8, height: 2.75 },
+  { id: 'airlock', label: 'Airlock vestibule', x0: -8.4, x1: -2.3, z0: -25.6, z1: -17.8, height: 2.75 },
 ]
 
 export const STATIONS: Station[] = [
@@ -117,6 +119,16 @@ export const STATIONS: Station[] = [
     facing: -Math.PI / 2,
     width: 2.9,
     bay: 'BAY 05 · COMM',
+  },
+  {
+    id: 'research',
+    label: 'Research module',
+    hint: 'Mission experiments and what the engine has found',
+    x: 8.3,
+    z: -21.7,
+    facing: Math.PI / 2,
+    width: 2.9,
+    bay: 'BAY 06 · LAB',
   },
 ]
 
