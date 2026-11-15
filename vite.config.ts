@@ -6,4 +6,13 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   base: './',
+  build: {
+    rollupOptions: {
+      // Two pages: the main application, and the standalone SIGNAL VEIL demonstration.
+      input: {
+        main: 'index.html',
+        signalVeil: 'signal-veil.html',
+      },
+    },
+  },
 })

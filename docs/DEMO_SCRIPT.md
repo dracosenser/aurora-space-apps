@@ -60,3 +60,18 @@ Click **Open the live demo**.
 - **Where would real data come from?** De-identified research data via OSDR and LSDA for calibration; on a mission, from the crew's own instruments under crew-controlled privacy.
 - **What would you validate first?** The alert thresholds against longitudinal analog and ISS data, then the simulator's muscle and bone responses with uncertainty bands.
 - **Is the radiation projection real?** The dose rates are from published MSL/RAD measurements; the projection is a simple integration and is labelled as such. A Mars round trip approaching or exceeding 600 mSv is consistent with published estimates, which is exactly why shielding and transit time dominate mission design.
+
+
+---
+
+## Signal Veil: two-minute segment
+
+Open `signal-veil.html`. The demonstration starts on mission day 115.
+
+1. **Wipe.** "You are inside the helmet and your breath has fogged the visor." Drag across it. Signals appear as you clear the glass. Let the rest dissolve.
+2. **Read.** Point to the central dial: the joint statistic is well past its limit, and an ember figure joins seven signals. "Each of these changed modestly. Sleep is down about 10%, resting heart rate up 7%. Together they are unmistakable."
+3. **Inspect.** Click **Sleep**. Show the baseline band, the smoothed line leaving it, and the plain-language reason for its status.
+4. **Connect.** Drag from **Sleep** to **Fatigue**: a supported relationship, sleep leading by one day. Then drag from **Exercise** to **Reaction time**: not established. "Drawing a line cannot create a relationship. It shows what the statistics support, including when they do not."
+5. **Replay.** Press **Replay how the pattern developed**. Around day 70 nothing is sustained. On day 88 the engine reports the pattern. Scrub to day 96: "Every indicator is individually ordinary here, and the joint pattern has been sustained for two weeks."
+6. **Response.** Open **Response**, scrub to day 150. A sleep protocol action was recorded on day 121. Two of four designated indicators moved back toward baseline; the engine lists a lighter work schedule in the same window and states that it cannot say the action caused the change.
+7. **Honesty.** Open **Data table**, then point to the provenance tags: synthetic measurements, statistical estimates and user-entered actions are never shown alike.

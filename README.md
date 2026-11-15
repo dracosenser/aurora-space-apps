@@ -136,6 +136,31 @@ The data layer (`src/data`, `src/lib`) has no React dependency and can be unit-t
 
 ---
 
+## Constellation Engine and Signal Veil
+
+Two additions sit alongside the main application and do not change its navigation or layout.
+
+**Constellation Engine** (`src/engine/`) is a standalone statistical library: robust personal baselines, EWMA deviation tracking, a multivariate EWMA statistic that detects several modest shifts happening together, relationship tests with detrending and multiplicity correction, before/after tracking around recorded protocol actions, and structured explanations. It has no React or DOM dependency. See `docs/CONSTELLATION_ENGINE.md`.
+
+**Signal Veil** (`src/features/signal-veil/`) is a first-person visualization. You look out through a fogged helmet visor, wipe it clear, and explore a constellation of health signals driven by the engine. The fog is a procedural WebGL2 shader with a Canvas 2D fallback. See `docs/SIGNAL_VEIL.md`, which includes integration instructions.
+
+```bash
+npm run dev            # then open http://localhost:5173/signal-veil.html
+npm test               # 136 tests: engine statistics and visualization logic
+npm run check:engine   # prints what the engine finds in the demonstration mission
+```
+
+The demonstration is a deterministic, fictional 150-day mission. Every measurement is synthetic.
+
+| Document | Contents |
+|---|---|
+| `docs/SIGNAL_VEIL.md` | Interaction, rendering techniques, integration instructions, limitations |
+| `docs/CONSTELLATION_ENGINE.md` | Statistical methodology and verification |
+| `docs/COMPETITIVE_RESEARCH.md` | What was examined, what could not be accessed, and how AURORA differs |
+| `docs/NASA_DATA.md` | NASA resources consulted and the real-versus-synthetic boundary |
+
+---
+
 ## License
 
 MIT. Fictional mission and crew; no real person is depicted.
