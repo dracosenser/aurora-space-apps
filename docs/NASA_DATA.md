@@ -30,7 +30,15 @@ How it is used: this is the requirement the Constellation Engine addresses direc
 
 <https://www.nasa.gov/hrp/risks/>
 
-Risks listed there that the demonstration's categories correspond to:
+The page lists 17 risks, read in full on 15 November 2026:
+
+- **Human physiology (11):** Altered Immune System Responses; Altered Sensorimotor and Vestibular Function; Cardiovascular Adaptations; Decompression Sickness; Host-Microorganism Interactions; Hypoxia; Inadequate Food and Nutrition; Injury and Compromised Performance from Spacewalks; Reduced Cardiorespiratory and Musculoskeletal Fitness; Spaceflight Associated Neuro-ocular Syndrome (SANS); Spaceflight-Induced Bone Changes
+- **Behavioral performance and human factors (5):** Behavioral Changes and Psychiatric Disorders; Inadequate Teamwork; Inadequate Sleep and Irregular Schedules; Inadequate Systems Operations Support; Injury from Dynamic Loads
+- **Space radiation (1):** Radiation-Induced Cancers
+
+These are names of risks NASA studies. They are not diagnoses, and AURORA never asserts a crew member has one.
+
+Risks the demonstration's categories correspond to:
 
 | SIGNAL VEIL category | HRP risk |
 |---|---|
@@ -41,13 +49,40 @@ Risks listed there that the demonstration's categories correspond to:
 
 The page lists no separate cognition risk; reaction-time testing is included here because cognitive performance is a recognised concern within behavioral health and sleep research. How it is used: choice of categories and vocabulary only. No numeric value is taken from it.
 
+The five body systems on the Self-Assessment page (`src/data/bodySystems.ts`) map to the same list:
+
+| Body system | HRP risks |
+|---|---|
+| Cardiovascular | Cardiovascular Adaptations; Reduced Cardiorespiratory and Musculoskeletal Fitness |
+| Neurobehavioral | Behavioral Changes and Psychiatric Disorders; Inadequate Sleep and Irregular Schedules |
+| Sensory | Spaceflight Associated Neuro-ocular Syndrome (SANS); Altered Sensorimotor and Vestibular Function |
+| Immune | Altered Immune System Responses; Host-Microorganism Interactions |
+| Musculoskeletal | Spaceflight-Induced Bone Changes; Reduced Cardiorespiratory and Musculoskeletal Fitness |
+
 ### NASA Open Science Data Repository (OSDR)
 
 <https://osdr.nasa.gov/>
 
-OSDR hosts open spaceflight biological and physiological data. Search results indicated that human data ranges from open to mediated access, that OSDR added open-access human biological data from the Inspiration4 mission in 2024, and that sensor-level astronaut time series are generally subject to access controls.
+OSDR hosts open spaceflight biological and physiological data, is species-agnostic, and includes data from the commercial astronauts of the SpaceX Inspiration4 mission. Data is programmatically accessible through GLOpenAPI (<https://visualization.genelab.nasa.gov/GLOpenAPI/>).
 
-**Finding: no openly downloadable, per-astronaut, daily time series covering sleep, heart rate, cognition and self-report together was identified.** A specific OSDR accession for such a dataset could not be confirmed, so none is cited. Forcing an unrelated dataset (for example rodent transcriptomics) into a crew-monitoring demonstration would have been misleading, so the demonstration is synthetic and says so.
+Repository reference: *NASA open science data repository: open science for life in space*, Nucleic Acids Research 53(D1), D1697 — <https://academic.oup.com/nar/article/53/D1/D1697/7903386>
+
+**Specific accessions, confirmed 15 November 2026.** An earlier pass recorded that no accession could be confirmed. These now can be:
+
+| Accession | Contents | Link |
+|---|---|---|
+| **OSD-569** | Whole Blood Measurements from the SpaceX Inspiration4 Mission: RNA-seq, epitranscriptome, WGS, clonal hematopoiesis, **CBC**. GeneLab GLDS-561, ALSDA LSDS-7, DOI 10.26030/e0rx-sh52 | <https://osdr.nasa.gov/bio/repo/data/studies/OSD-569> |
+| **OSD-575** | Blood serum, same mission and crew — metabolic panel | <https://osdr.nasa.gov/bio/repo/data/studies/OSD-575> |
+| **OSD-574** | Skin biopsy, same mission | <https://osdr.nasa.gov/bio/repo/data/studies/OSD-574> |
+
+These sit in the Space Omics and Medical Atlas (SOMA) family with OSD-570, -571, -572, -573, -630, -656 and -687. Reference: *Inspiration4 data access through the NASA Open Science Data Repository*, npj Microgravity 2024 — <https://www.nature.com/articles/s41526-024-00393-5>
+
+**Why none of it is embedded in AURORA.** Two reasons, both deciding:
+
+1. **Access.** Raw data from whole blood, urine and skin biopsies, collected before, during and after spaceflight, is under controlled access and must be formally requested. Requesting, receiving and then redistributing crew biospecimen data inside a hackathon demonstration is not appropriate, and would blur exactly the provenance line this document exists to keep sharp.
+2. **Shape.** The Inspiration4 corpus is four civilian astronauts on a three-day free-flyer mission, sampled at a handful of timepoints. The Constellation Engine needs daily or near-daily series over months. **No openly downloadable, per-astronaut, daily time series covering sleep, heart rate, cognition and self-report together was identified.** That dataset does not appear to exist publicly.
+
+So these accessions are cited as the evidence that the indicator families AURORA models — complete blood count and immune markers, metabolic panels — are real flight-relevant measurements, and **every value the application displays is generated.** Forcing an unrelated dataset into a crew-monitoring demonstration would have been misleading.
 
 ### Human Research Roadmap
 
