@@ -2,6 +2,7 @@ import { FLOATS_PER_VERTEX, axisOf, buildEmissive, buildStructure, type MeshData
 import { fpsView, forward, multiply, orthographic, perspective, lookAt, type Mat4 } from './mat4'
 import { DEPTH_FRAG, DEPTH_VERT, EMISSIVE_FRAG, SCENE_FRAG, SCENE_VERT, SKY_FRAG, SKY_VERT } from './shaders'
 import { CUPOLA, ROOMS, STATIONS } from '../model/deck'
+import { QUALITY, type Quality, type QualityName } from './quality'
 
 export interface DeckFrame {
   eye: [number, number, number]
@@ -13,7 +14,6 @@ export interface DeckFrame {
 }
 
 const FOV = (70 * Math.PI) / 180
-const SHADOW_SIZE = 1024
 
 /**
  * Sunlight direction, pointing from the scene toward the sun.
@@ -86,6 +86,10 @@ export class DeckRenderer {
   private emisCount: number
   private lost = false
   private shadowDrawn = false
+  private q: Quality = QUALITY.high
+  private shadowSize = 0
+  /** Set when the cupola is outside the view: the planet pass is then skipped. */
+  private skySkipped = false
 
   private proj: Mat4 = new Float32Array(16)
   private view: Mat4 = new Float32Array(16)
@@ -115,8 +119,8 @@ export class DeckRenderer {
     this.depthProg = link(gl, DEPTH_VERT, DEPTH_FRAG, 'Depth')
 
     for (const [name, prog, names] of [
-      ['sky', this.skyProg, ['uRight', 'uUp', 'uFwd', 'uAspect', 'uTanHalfFov', 'uTime', 'uEarthDir', 'uEarthDist', 'uEarthR', 'uSunDir']],
-      ['scene', this.sceneProg, ['uViewProj', 'uLightViewProj', 'uLightPos', 'uLightCol', 'uLightCount', 'uEye', 'uAlert', 'uSunDir', 'uSunCol', 'uShadow', 'uShadowTexel', 'uEarthTint', 'uCupola']],
+      ['sky', this.skyProg, ['uRight', 'uUp', 'uFwd', 'uAspect', 'uTanHalfFov', 'uTime', 'uEarthDir', 'uEarthDist', 'uEarthR', 'uSunDir', 'uOct']],
+      ['scene', this.sceneProg, ['uViewProj', 'uLightViewProj', 'uLightPos', 'uLightCol', 'uLightCount', 'uEye', 'uAlert', 'uSunDir', 'uSunCol', 'uShadow', 'uShadowTexel', 'uEarthTint', 'uCupola', 'uPcf', 'uMaxLights']],
       ['emis', this.emisProg, ['uViewProj', 'uLightViewProj', 'uTime', 'uAlert']],
       ['depth', this.depthProg, ['uLightViewProj']],
     ] as const) {
@@ -135,7 +139,7 @@ export class DeckRenderer {
     this.depthVao = this.makeDepthVao(this.structBuf)
     this.emptyVao = gl.createVertexArray()
 
-    this.setupShadow()
+    this.setQuality('high')
 
     // Interior fixtures: one light per deck-head run, one per console screen.
     const pts: number[] = []
@@ -162,18 +166,54 @@ export class DeckRenderer {
     this.lightCol = new Float32Array(cols.slice(0, this.lightCount * 3))
 
     gl.enable(gl.DEPTH_TEST)
-    // Double-sided by design: the interior is emitted in several wall
-    // orientations, and a reversed winding would silently delete a face. The
-    // fragment shader faces the normal toward the viewer instead.
+    // Deliberately double-sided, and this was tested rather than assumed.
+    // Culling back faces measured 21% off the interior pass, but orientFaces
+    // can only correct a face where one side is walkable and the other is not;
+    // at module junctions both sides are, so those keep whatever winding they
+    // were built with and culling deletes them. A ship with holes in it is not
+    // worth 21%. The resolution scaling below is a bigger lever and is safe.
     gl.disable(gl.CULL_FACE)
     gl.clearColor(0, 0, 0, 1)
   }
 
+  /**
+   * Apply a preset. Only the shadow map needs reallocating; everything else is
+   * a uniform, and the frame resolution is handled by the caller through
+   * resize, so switching quality never rebuilds geometry.
+   */
+  setQuality(name: QualityName): void {
+    const next = QUALITY[name]
+    this.q = next
+    if (next.shadowSize !== this.shadowSize) {
+      this.shadowSize = next.shadowSize
+      this.setupShadow()
+      this.shadowDrawn = false
+    }
+  }
+
+  get quality(): Quality {
+    return this.q
+  }
+
+  /** Device pixels this preset wants for a given CSS size. */
+  bufferSize(cssW: number, cssH: number, dpr: number): [number, number] {
+    const s = Math.min(dpr, this.q.maxDpr) * this.q.renderScale
+    return [Math.max(1, Math.round(cssW * s)), Math.max(1, Math.round(cssH * s))]
+  }
+
   private setupShadow(): void {
     const gl = this.gl
+    if (this.shadowFbo) gl.deleteFramebuffer(this.shadowFbo)
+    if (this.shadowTex) gl.deleteTexture(this.shadowTex)
+    this.shadowFbo = null
+    this.shadowTex = null
+    if (this.shadowSize === 0) {
+      this.computeLightMatrix()
+      return
+    }
     this.shadowTex = gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTex)
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE)
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, this.shadowSize, this.shadowSize)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
@@ -184,9 +224,11 @@ export class DeckRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFbo)
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this.shadowTex, 0)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    this.computeLightMatrix()
+  }
 
-    // The sun only reaches the command module, so the map covers that volume
-    // rather than the whole vessel: 1024 texels over 16 m is a sharp shadow.
+  /** The sun only reaches the command module, so the map covers that volume. */
+  private computeLightMatrix(): void {
     const cmd = ROOMS[1]
     const target: [number, number, number] = [CUPOLA.x, 1.3, cmd.z0 + 2]
     const eye: [number, number, number] = [target[0] + SUN[0] * 18, target[1] + SUN[1] * 18, target[2] + SUN[2] * 18]
@@ -231,16 +273,53 @@ export class DeckRenderer {
     return (this.structCount + this.emisCount) / 3
   }
 
+  /** For the diagnostics readout: was the planet pass skipped this frame? */
+  get planetSkipped(): boolean {
+    return this.skySkipped
+  }
+
   resize(widthPx: number, heightPx: number): void {
     if (this.canvas.width !== widthPx) this.canvas.width = widthPx
     if (this.canvas.height !== heightPx) this.canvas.height = heightPx
   }
 
+  /**
+   * Is the cupola worth drawing a planet for?
+   *
+   * The planet shader is a full-screen pass evaluating around thirty octaves
+   * of noise per pixel, and in most of the vessel not one of those pixels
+   * survives to be seen. This answers cheaply and conservatively: never from
+   * one of the side modules, where the structure blocks the view outright, and
+   * otherwise only when the cupola's bounding sphere falls inside the view
+   * cone. The saving could not be isolated on the software rasteriser
+   * available here, where interior fill dominates instead; it is kept because
+   * skipping a pass whose every pixel is overdrawn is right regardless.
+   */
+  private cupolaVisible(f: DeckFrame): boolean {
+    const [ex, ey, ez] = f.eye
+    // The side modules have no line of sight to the bow at all.
+    if (Math.abs(ex) > 2.4 && ez < 14) return false
+
+    const dx = CUPOLA.x - ex
+    const dy = CUPOLA.y - ey
+    const dz = CUPOLA.z - ez
+    const dist = Math.hypot(dx, dy, dz)
+    if (dist < CUPOLA.radius * 1.5) return true
+    const fwd = forward(f.yaw, f.pitch)
+    const cos = (dx * fwd[0] + dy * fwd[1] + dz * fwd[2]) / dist
+    const ang = Math.acos(Math.max(-1, Math.min(1, cos)))
+    // Half the diagonal field of view, plus the cupola's angular size, plus a
+    // margin so it is never skipped while sliding into frame.
+    const half = Math.atan(Math.tan(FOV / 2) * 1.8)
+    return ang < half + Math.asin(Math.min(1, (CUPOLA.radius * 1.4) / dist)) + 0.12
+  }
+
   /** The structure and the sun never move, so the map is drawn once. */
   private drawShadow(): void {
     const gl = this.gl
+    if (!this.shadowFbo) return
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFbo)
-    gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE)
+    gl.viewport(0, 0, this.shadowSize, this.shadowSize)
     gl.clear(gl.DEPTH_BUFFER_BIT)
     gl.useProgram(this.depthProg)
     gl.uniformMatrix4fv(this.u.depth.uLightViewProj, false, this.lightViewProj)
@@ -266,7 +345,12 @@ export class DeckRenderer {
     fpsView(f.eye[0], f.eye[1], f.eye[2], f.yaw, f.pitch, this.view)
     multiply(this.proj, this.view, this.viewProj)
 
-    // ---- sky and planet, behind everything
+    // ---- sky and planet, behind everything, and only when it can be seen
+    this.skySkipped = !this.cupolaVisible(f)
+    if (this.skySkipped) {
+      gl.depthMask(true)
+      gl.enable(gl.DEPTH_TEST)
+    } else {
     gl.depthMask(false)
     gl.disable(gl.DEPTH_TEST)
     gl.useProgram(this.skyProg)
@@ -292,7 +376,9 @@ export class DeckRenderer {
     gl.uniform1f(su.uEarthDist, 6.79)
     gl.uniform1f(su.uEarthR, 6.371)
     gl.uniform3f(su.uSunDir, SUN[0], SUN[1], SUN[2])
+    gl.uniform1i(su.uOct, this.q.planetOctaves)
     gl.drawArrays(gl.TRIANGLES, 0, 3)
+    }
 
     // ---- lit structure
     gl.enable(gl.DEPTH_TEST)
@@ -307,10 +393,14 @@ export class DeckRenderer {
     gl.uniform3f(cu.uEye, f.eye[0], f.eye[1], f.eye[2])
     gl.uniform1f(cu.uAlert, f.alert)
     gl.uniform3f(cu.uSunDir, SUN[0], SUN[1], SUN[2])
-    gl.uniform3f(cu.uSunCol, 3.4, 3.26, 3.0)
-    gl.uniform3f(cu.uEarthTint, 0.09, 0.15, 0.24)
+    if (this.shadowSize === 0) gl.uniform3f(cu.uSunCol, 0, 0, 0)
+    else gl.uniform3f(cu.uSunCol, 3.4, 3.26, 3.0)
+    const tint = this.shadowSize === 0 ? 0.26 : 0.09
+    gl.uniform3f(cu.uEarthTint, tint, tint * 1.65, tint * 2.6)
     gl.uniform3f(cu.uCupola, CUPOLA.x, CUPOLA.y, CUPOLA.z)
-    gl.uniform1f(cu.uShadowTexel, 1 / SHADOW_SIZE)
+    gl.uniform1f(cu.uShadowTexel, 1 / Math.max(1, this.shadowSize))
+    gl.uniform1i(cu.uPcf, this.q.pcf)
+    gl.uniform1i(cu.uMaxLights, this.q.maxLights)
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTex)
     gl.uniform1i(cu.uShadow, 0)

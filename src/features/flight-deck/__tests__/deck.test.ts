@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ROOMS, SPAWN, STATIONS, heightAt, inside, moveWithCollision, stationInReach } from '../model/deck'
+import { ALL_TASKS, KNOWN_TASKS, OBJECTIVES, currentObjective, objectiveDone, type TaskId } from '../model/objectives'
 
 const RADIUS = 0.42
 
@@ -107,5 +108,71 @@ describe('navigability', () => {
 
   it('gives every station a distinct bay number', () => {
     expect(new Set(STATIONS.map((s) => s.bay)).size).toBe(STATIONS.length)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Console zoom and mission objectives
+// ---------------------------------------------------------------------------
+
+/** Mirror of screenPose in FlightDeck.tsx: where the camera reads a console. */
+function screenPose(s: (typeof STATIONS)[number]) {
+  const bx = Math.sin(s.facing)
+  const bz = Math.cos(s.facing)
+  return { x: s.x - bx * 1.04, y: 1.3, z: s.z - bz * 1.04, yaw: Math.atan2(-bx, -bz) }
+}
+
+describe('console zoom', () => {
+  it.each(STATIONS.map((s) => [s.label, s] as const))('puts the camera inside the module at %s', (_l, s) => {
+    const p = screenPose(s)
+    expect(inside(p.x, p.z)).toBe(true)
+    expect(p.y).toBeLessThan(heightAt(p.x, p.z) - 0.2)
+  })
+
+  it.each(STATIONS.map((s) => [s.label, s] as const))('faces the screen squarely at %s', (_l, s) => {
+    const p = screenPose(s)
+    const fx = -Math.sin(p.yaw)
+    const fz = -Math.cos(p.yaw)
+    const dx = s.x - p.x
+    const dz = s.z - p.z
+    const d = Math.hypot(dx, dz)
+    expect((dx / d) * fx + (dz / d) * fz).toBeGreaterThan(0.999)
+    expect(d).toBeGreaterThan(0.9)
+    expect(d).toBeLessThan(1.2)
+  })
+
+  it.each(STATIONS.map((s) => [s.label, s] as const))('keeps %s the station in reach while zoomed', (_l, s) => {
+    const p = screenPose(s)
+    expect(stationInReach(p.x, p.z, p.yaw)?.id).toBe(s.id)
+  })
+})
+
+describe('mission objectives', () => {
+  it('has unique task ids', () => {
+    expect(new Set(ALL_TASKS).size).toBe(ALL_TASKS.length)
+  })
+
+  it('never completes an objective by merely opening a console', () => {
+    const arriveOnly = OBJECTIVES.filter((o) => o.tasks.every((t) => t.id.startsWith('open-')))
+    expect(arriveOnly).toEqual([])
+  })
+
+  it('needs more than one action per objective', () => {
+    for (const o of OBJECTIVES) expect(o.tasks.length).toBeGreaterThan(1)
+  })
+
+  it('does not complete an objective from one of its tasks', () => {
+    const first = OBJECTIVES[0]
+    expect(objectiveDone(first, [first.tasks[0].id])).toBe(false)
+    expect(objectiveDone(first, first.tasks.map((t) => t.id))).toBe(true)
+  })
+
+  it('walks the briefing from the first objective to none left', () => {
+    expect(currentObjective([])?.code).toBe('OBJ-01')
+    expect(currentObjective(ALL_TASKS)).toBeNull()
+  })
+
+  it('persists every task the station can report, not only objective ones', () => {
+    for (const t of ['open-navigation', 'open-comms'] as TaskId[]) expect(KNOWN_TASKS).toContain(t)
   })
 })

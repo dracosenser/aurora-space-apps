@@ -109,6 +109,32 @@ support, so the ship shows no distance travelled and the cabin figures are fixed
 nominal values rather than a simulated atmosphere. A control that moved a number
 without moving a model would have been worse than showing none.
 
+**Reading a console.** Activating one flies the camera onto its screen over
+about six tenths of a second and opens that screen's content in place, framed
+inside the canvas rather than as a dialog over the page. Stepping back flies
+the camera out to exactly where you were standing. Movement is locked for the
+duration, so the two cannot fight.
+
+**Mission objectives.** Five objectives, each needing more than one real action:
+opening a console never completes one on its own. Tasks are marked by the
+actions themselves — selecting a crew member, reading a trend, moving a
+scenario parameter, tracing a relationship in the visor — and a test asserts
+that no objective can be satisfied merely by arriving somewhere.
+
+**Graphics quality.** Three presets, chosen automatically and overridable. They
+control how many pixels each pass covers rather than deleting equipment from
+the vessel: frame resolution, the planet's own lower resolution on top of that,
+shadow map size (off entirely on Low, where the planet's light through the
+cupola is raised to compensate), filter taps and octave budgets. Measured on
+one software rasteriser, Low costs about 35 per cent of High and Medium about
+74 per cent. A governor watches frame time and steps between them, slowly
+enough in both directions that a couple of long frames cannot start it
+oscillating. The planet pass is skipped outright whenever the cupola is out of
+view.
+
+**Fullscreen** via the Fullscreen API, with the briefing, prompts and consoles
+all still reachable inside it.
+
 **If WebGL2 is missing**, the page falls back to a top-down deck plan with the
 same five consoles, which open the same panels.
 

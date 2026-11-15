@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Radio, Thermometer } from 'lucide-react'
 import { useMission, ASTRONAUTS, EVENTS, MISSION } from '../../../hooks/useMission'
 import { phaseForDay } from '../../../data/mission'
@@ -6,6 +6,7 @@ import { runScenario, DEFAULT_PARAMS, RADIATION_SCENARIOS } from '../../../lib/s
 import type { RadiationScenario, ScenarioParams } from '../../../types'
 import { Button } from '../../../components/ui/Button'
 import type { StationId } from '../model/deck'
+import type { TaskId } from '../model/objectives'
 
 /**
  * The console screens, as DOM over the canvas.
@@ -81,7 +82,7 @@ function Navigation() {
 }
 
 // ---------------------------------------------------------------- medical
-function Medical({ onLeave }: { onLeave: (page: 'signal-veil' | 'crew-health' | 'early-warning') => void }) {
+function Medical({ onLeave, onTask }: { onLeave: (page: 'signal-veil' | 'crew-health' | 'early-warning') => void; onTask: (t: TaskId) => void }) {
   const m = useMission()
   const a = ASTRONAUTS.find((x) => x.id === m.selectedAstronautId) ?? ASTRONAUTS[0]
   const rec = useMemo(
@@ -89,6 +90,17 @@ function Medical({ onLeave }: { onLeave: (page: 'signal-veil' | 'crew-health' | 
     [m.visibleRecords, a.id],
   )
   const theirAlerts = m.alerts.filter((al) => al.active && al.astronautIds.includes(a.id))
+
+  // Reading a crew member's measurements is the objective, so it completes
+  // only once there is actually a record on screen for them.
+  useEffect(() => {
+    if (rec) onTask('read-vitals')
+  }, [rec, onTask])
+  // The visor records its own progress on the shared log; tracing a supported
+  // relationship there is what closes that objective, wherever it was done.
+  useEffect(() => {
+    if (m.log.veil.includes('foundSupported')) onTask('veil-connect')
+  }, [m.log.veil, onTask])
 
   return (
     <div className="grid gap-5 md:grid-cols-2">
@@ -98,7 +110,10 @@ function Medical({ onLeave }: { onLeave: (page: 'signal-veil' | 'crew-health' | 
           {ASTRONAUTS.map((x) => (
             <button
               key={x.id}
-              onClick={() => m.setSelectedAstronautId(x.id)}
+              onClick={() => {
+                m.setSelectedAstronautId(x.id)
+                onTask('select-crew')
+              }}
               aria-pressed={x.id === a.id}
               className={`mono border px-2 py-1 text-[10.5px] uppercase tracking-wider transition-colors ${
                 x.id === a.id ? 'border-cyan-300/70 text-cyan-200' : 'border-white/15 text-white/50 hover:border-white/35 hover:text-white/80'
@@ -132,7 +147,11 @@ function Medical({ onLeave }: { onLeave: (page: 'signal-veil' | 'crew-health' | 
             <p className="mono mb-2 text-[10.5px] uppercase tracking-[0.18em] text-amber-300/70">Flagged for review</p>
             <ul className="mb-4 space-y-2">
               {theirAlerts.slice(0, 3).map((al) => (
-                <li key={al.id} className="border-l border-amber-300/40 pl-3">
+                <li
+                  key={al.id}
+                  onClick={() => onTask('open-alert')}
+                  className="cursor-pointer border-l border-amber-300/40 pl-3 transition-colors hover:border-amber-300/80"
+                >
                   <p className="text-[13px] text-white/85">{al.title}</p>
                   <p className="mono mt-0.5 text-[10px] uppercase tracking-[0.18em] text-white/35">
                     {al.ruleName} · from MD {al.startDay}
@@ -147,10 +166,22 @@ function Medical({ onLeave }: { onLeave: (page: 'signal-veil' | 'crew-health' | 
           {a.name.split(' ')[0]}. Leaving the deck keeps your selection.
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => onLeave('signal-veil')} icon={<ArrowUpRight className="h-3.5 w-3.5" />}>
+          <Button
+            onClick={() => {
+              onTask('open-veil')
+              onLeave('signal-veil')
+            }}
+            icon={<ArrowUpRight className="h-3.5 w-3.5" />}
+          >
             Open Signal Veil
           </Button>
-          <Button variant="outline" onClick={() => onLeave('crew-health')}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              onTask('read-trends')
+              onLeave('crew-health')
+            }}
+          >
             Crew health
           </Button>
           <Button variant="outline" onClick={() => onLeave('early-warning')}>
@@ -163,7 +194,7 @@ function Medical({ onLeave }: { onLeave: (page: 'signal-veil' | 'crew-health' | 
 }
 
 // ------------------------------------------------------------------- crew
-function Crew() {
+function Crew({ onTask }: { onTask: (t: TaskId) => void }) {
   const m = useMission()
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -173,7 +204,10 @@ function Crew() {
         return (
           <button
             key={a.id}
-            onClick={() => m.setSelectedAstronautId(a.id)}
+            onClick={() => {
+              m.setSelectedAstronautId(a.id)
+              onTask('read-sleep')
+            }}
             className={`border p-3 text-left transition-colors ${
               a.id === m.selectedAstronautId ? 'border-cyan-300/50' : 'border-white/12 hover:border-white/30'
             }`}
@@ -214,7 +248,7 @@ function Crew() {
  * support. The controls that follow are the real Mission Scenario Simulator,
  * so changing them changes the model the rest of the application runs on.
  */
-function Environment({ onLeave }: { onLeave: (page: 'simulator') => void }) {
+function Environment({ onLeave, onTask }: { onLeave: (page: 'simulator') => void; onTask: (t: TaskId) => void }) {
   const m = useMission()
   const [params, setParams] = useState<ScenarioParams>(m.lastScenario ?? DEFAULT_PARAMS)
   const result = useMemo(() => runScenario(params), [params])
@@ -223,6 +257,7 @@ function Environment({ onLeave }: { onLeave: (page: 'simulator') => void }) {
     const next = { ...params, ...patch }
     setParams(next)
     m.setLastScenario(next)
+    onTask('change-scenario')
   }
   const delta = (a: number, b: number) => {
     const d = a - b
@@ -395,13 +430,15 @@ function Comms() {
 export function StationContent({
   id,
   onLeave,
+  onTask,
 }: {
   id: StationId
   onLeave: (page: 'signal-veil' | 'crew-health' | 'early-warning' | 'simulator') => void
+  onTask: (t: TaskId) => void
 }) {
   if (id === 'navigation') return <Navigation />
-  if (id === 'medical') return <Medical onLeave={onLeave} />
-  if (id === 'crew') return <Crew />
-  if (id === 'environment') return <Environment onLeave={onLeave} />
+  if (id === 'medical') return <Medical onLeave={onLeave} onTask={onTask} />
+  if (id === 'crew') return <Crew onTask={onTask} />
+  if (id === 'environment') return <Environment onLeave={onLeave} onTask={onTask} />
   return <Comms />
 }

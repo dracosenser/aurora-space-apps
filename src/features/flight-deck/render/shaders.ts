@@ -89,6 +89,7 @@ uniform vec3 uEarthDir;
 uniform float uEarthDist;
 uniform float uEarthR;
 uniform vec3 uSunDir;
+uniform int uOct;   // octave budget, from the quality preset
 
 float hash31(vec3 p) {
   p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -158,22 +159,22 @@ void main() {
     // so continent-scale noise alone reads as smooth blobs. These run to seven
     // and five octaves respectively, which carries the terrain down to
     // something like coastline scale at this altitude.
-    float land = fbm(ns * 3.4, 7);
-    float detail = fbm(ns * 38.0, 5);
+    float land = fbm(ns * 3.4, min(7, uOct));
+    float detail = fbm(ns * 38.0, min(5, uOct));
     float mask = smoothstep(0.545, 0.60, land + detail * 0.06);
 
     vec3 ocean = mix(vec3(0.006, 0.028, 0.085), vec3(0.016, 0.075, 0.20), smoothstep(0.3, 0.62, land));
     vec3 green = mix(vec3(0.052, 0.082, 0.040), vec3(0.145, 0.138, 0.075), detail);
     vec3 arid = vec3(0.315, 0.245, 0.135);
-    vec3 ground = mix(green, arid, smoothstep(0.42, 0.70, fbm(ns * 9.0 + 19.0, 4)));
+    vec3 ground = mix(green, arid, smoothstep(0.42, 0.70, fbm(ns * 9.0 + 19.0, min(4, uOct))));
     vec3 surface = mix(ocean, ground, mask);
     float lat = abs(ns.y);
     surface = mix(surface, vec3(0.74, 0.78, 0.84), smoothstep(0.82, 0.96, lat));
 
     // Cloud deck, drifting independently of the ground.
     vec3 cp = spin(n, uTime * 0.0045 + 0.4) * 9.0 + vec3(uTime * 0.006, 0.0, 0.0);
-    float cloud = smoothstep(0.50, 0.78, fbm(cp, 6));
-    cloud *= 0.5 + 0.5 * smoothstep(0.15, 0.65, fbm(cp * 3.1, 4));
+    float cloud = smoothstep(0.50, 0.78, fbm(cp, min(6, uOct)));
+    cloud *= 0.5 + 0.5 * smoothstep(0.15, 0.65, fbm(cp * 3.1, min(4, uOct)));
     cloud *= 0.6 + 0.6 * smoothstep(0.05, 0.4, abs(sin(ns.y * 3.1)));
     cloud = clamp(cloud, 0.0, 1.0);
 
@@ -187,7 +188,7 @@ void main() {
 
     // Night side: city lights on land, faint airglow elsewhere
     float night = 1.0 - day;
-    float cities = mask * smoothstep(0.62, 0.80, fbm(ns * 70.0, 4)) * smoothstep(0.0, 0.35, 1.0 - lat);
+    float cities = mask * smoothstep(0.62, 0.80, fbm(ns * 70.0, min(4, uOct))) * smoothstep(0.0, 0.35, 1.0 - lat);
     lit += vec3(1.0, 0.72, 0.36) * cities * night * 0.5 * (1.0 - cloud * 0.8);
     lit += vec3(0.035, 0.085, 0.14) * night * 0.12;
 
@@ -262,6 +263,8 @@ uniform vec3 uSunDir;
 uniform vec3 uSunCol;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
+uniform int uPcf;      // 1 for a hard edge, 9 for a soft one
+uniform int uMaxLights;
 uniform vec3 uEarthTint;
 uniform vec3 uCupola;
 
@@ -269,8 +272,10 @@ float sunShadow() {
   vec3 p = vLightPos.xyz / vLightPos.w;
   p = p * 0.5 + 0.5;
   if (p.z > 1.0 || p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return 0.0;
-  // Percentage-closer filtering. A 3x3 tap turns the window edges into
-  // something nearer a penumbra than a stencil.
+  // Percentage-closer filtering turns the window edge into something nearer a
+  // penumbra than a stencil. Nine taps on High, one on the cheaper presets:
+  // the edge hardens, but nothing disappears from the room.
+  if (uPcf < 4) return texture(uShadow, vec3(p.xy, p.z - 0.0022));
   float s = 0.0;
   for (int y = -1; y <= 1; y++) {
     for (int x = -1; x <= 1; x++) {
@@ -312,7 +317,7 @@ void main() {
 
   // Interior fixtures.
   for (int i = 0; i < MAX_LIGHTS; i++) {
-    if (i >= uLightCount) break;
+    if (i >= uLightCount || i >= uMaxLights) break;
     vec3 d = uLightPos[i] - vPos;
     float dist2 = max(dot(d, d), 1e-4);
     // The vessel is forty metres long, so most fixtures are nowhere near any

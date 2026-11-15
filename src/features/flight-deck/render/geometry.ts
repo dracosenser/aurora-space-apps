@@ -492,8 +492,62 @@ export function buildStructure(): MeshData {
   for (const s of STATIONS) workstation(b, s.x, s.z, s.facing, s.width)
 
   const mesh = b.data()
+  orientFaces(mesh)
   bakeAmbientOcclusion(mesh)
   return mesh
+}
+
+/**
+ * Turn every face to point into the space a crew member can occupy.
+ *
+ * The interior is emitted from several wall orientations, caps, collars and
+ * fittings, and getting the winding right by hand in every one of them is a
+ * bug farm: the first build of this feature silently deleted whole walls that
+ * way. Rather than render double-sided, which shades every surface twice, each
+ * triangle is tested here against the deck plan. Where one side is walkable
+ * and the other is not, the face is made to point at the walkable side,
+ * flipping its winding and its normal together. Thin free-standing objects —
+ * consoles, handrails, stowage — have open space on both sides, so the test is
+ * not decisive and they are left exactly as built.
+ *
+ * This is not used to enable backface culling: at module junctions both sides
+ * are walkable, the test is not decisive there, and culling those faces
+ * deletes them. It is kept because the ambient-occlusion bake samples the
+ * hemisphere about the stored normal, and a normal pointing into a wall would
+ * sample solid structure and darken the whole surface.
+ */
+function orientFaces(mesh: MeshData): void {
+  const v = mesh.vertices
+  const S = FLOATS_PER_VERTEX
+  let flipped = 0
+  for (let t = 0; t < v.length; t += S * 3) {
+    const cx = (v[t] + v[t + S] + v[t + 2 * S]) / 3
+    const cy = (v[t + 1] + v[t + S + 1] + v[t + 2 * S + 1]) / 3
+    const cz = (v[t + 2] + v[t + S + 2] + v[t + 2 * S + 2]) / 3
+    const nx = v[t + 3]
+    const ny = v[t + 4]
+    const nz = v[t + 5]
+    const d = 0.16
+    const front = cy + ny * d > 0.02 && cy + ny * d < 3.3 && inside(cx + nx * d, cz + nz * d)
+    const back = cy - ny * d > 0.02 && cy - ny * d < 3.3 && inside(cx - nx * d, cz - nz * d)
+    if (front === back) continue // not decisive: leave it alone
+    if (front) continue // already facing the open side
+    // Swap two vertices to reverse the winding, and negate the normals.
+    for (let k = 0; k < S; k++) {
+      const a = t + S + k
+      const bb = t + 2 * S + k
+      const tmp = v[a]
+      v[a] = v[bb]
+      v[bb] = tmp
+    }
+    for (let i = 0; i < 3; i++) {
+      v[t + i * S + 3] = -v[t + i * S + 3]
+      v[t + i * S + 4] = -v[t + i * S + 4]
+      v[t + i * S + 5] = -v[t + i * S + 5]
+    }
+    flipped++
+  }
+  if (flipped) console.info(`[flight-deck] oriented ${flipped} faces toward the cabin`)
 }
 
 /**
