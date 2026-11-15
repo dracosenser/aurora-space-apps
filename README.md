@@ -40,6 +40,7 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 | Section | Purpose |
 |---|---|
 | **Self-Assessment** | The crew member's own station. Eight readings taken and entered by hand, each with how to take it, why it matters in spaceflight, a reference band drawn to scale and a written action for the band it lands in. A clickable human figure opens five body systems. Duty-period countdown, readiness instrument, protocols and mission patches |
+| **Flight Deck** | The vessel itself, in first person. Walk a spine corridor, four alcoves and a command deck with the destination in the bow window. Five live consoles: navigation, medical, crew quarters, environmental control and communications. WebGL2, no engine, no model files, no new dependencies |
 | **Signal Veil** | The signature instrument, now a page of the application rather than a separate demo. A fogged EVA visor you wipe clear to reveal one crew member's health signals as a constellation, driven by the Constellation Engine. Inspect a signal, draw a connection, scrub the mission timeline, replay how a pattern developed, record a response. Runs on the app's own crew records, with a crew switcher |
 | **Mission Control** | Mission elapsed time, phase, crew size, crew composite status, individual astronaut cards with sparklines, 90-day crew trend chart, recent alerts, interactive mission timeline, event log, optional live NASA space-weather feed |
 | **Crew Health Analytics** | Five categories (cardiovascular, sleep, physical, radiation, behavioral), 15 indicators, date-range presets and custom ranges, individual vs crew comparison, alert windows and mission events drawn on charts, 7-day smoothing, historical trend table |
@@ -50,6 +51,40 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 | **Space Apps Presentation** | Problem, relevance, how it works, NASA contribution, innovation, limitations and future work |
 
 Extra features: historical mission playback (top-bar slider recomputes every alert and score for any past day), astronaut profile pages, exportable Markdown mission health report, dark/light mode, guided demo tour, demo reset button, responsive layout.
+
+### The flight deck
+
+Built on raw WebGL2 rather than a 3D engine, because the project already
+hand-writes its shaders and adding Three.js for one page would roughly double
+the dependency weight for no capability this needed.
+
+**One source of truth for the space.** `model/deck.ts` holds the compartments as
+rectangles. The renderer builds walls from them and the player collides against
+them, so what you can see and where you can walk cannot drift apart. Doorways
+are not authored: a wall segment is omitted wherever it would open into another
+compartment, so moving a room moves its doors with it.
+
+**Everything is procedural.** The interior is generated into one interleaved
+buffer at startup — about 4,600 triangles, two draw calls — and no frame
+allocates. The starfield and the planet are evaluated per pixel from the view
+ray; there is no skybox texture and no asset to ship. Console screens are drawn
+unlit and added, with rows of unequal brightness so they read as displays with
+content rather than as lamps.
+
+**The consoles are AURORA, not a copy of it.** Station content is DOM rendered
+over the canvas, reading the same `MissionProvider` as every other page. Select a
+crew member in the medical bay and the rest of the application follows.
+Environmental control's scenario parameters are the real Mission Scenario
+Simulator: changing them changes the model the rest of the application runs on.
+Nothing aboard is a second copy of the mission.
+
+**What the deck does not claim.** AURORA models no trajectory and no life
+support, so the ship shows no distance travelled and the cabin figures are fixed
+nominal values rather than a simulated atmosphere. A control that moved a number
+without moving a model would have been worse than showing none.
+
+**If WebGL2 is missing**, the page falls back to a top-down deck plan with the
+same five consoles, which open the same panels.
 
 ### One game, two instruments
 
@@ -192,6 +227,8 @@ src/
   engine/       Constellation Engine: baselines, deviation, patterns, relationships,
                 joint statistics, timeline, response. No React, no DOM, 136 tests
   features/
+    flight-deck/  The vessel: model (deck plan, collision, pure and tested),
+                  render (procedural geometry, GLSL sky and interior), ui (consoles)
     signal-veil/  The visor: model (pure, tested), render (Canvas 2D + WebGL2
                   fog shader), ui (panels, charts, timeline, data table)
   lib/          Pure logic: stats, anomaly rules, health scoring, simulator, assistant, report

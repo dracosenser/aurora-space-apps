@@ -210,6 +210,7 @@ export type PageId =
   | 'mission-control'
   | 'self-check'
   | 'signal-veil'
+  | 'flight-deck'
   | 'crew-health'
   | 'early-warning'
   | 'simulator'
