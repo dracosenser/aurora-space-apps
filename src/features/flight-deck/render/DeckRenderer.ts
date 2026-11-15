@@ -1,7 +1,7 @@
-import { buildEmissive, buildStructure, type MeshData } from './geometry'
-import { fpsView, forward, multiply, perspective, type Mat4 } from './mat4'
-import { EMISSIVE_FRAG, SCENE_FRAG, SCENE_VERT, SKY_FRAG, SKY_VERT } from './shaders'
-import { STATIONS } from '../model/deck'
+import { FLOATS_PER_VERTEX, axisOf, buildEmissive, buildStructure, type MeshData } from './geometry'
+import { fpsView, forward, multiply, orthographic, perspective, lookAt, type Mat4 } from './mat4'
+import { DEPTH_FRAG, DEPTH_VERT, EMISSIVE_FRAG, SCENE_FRAG, SCENE_VERT, SKY_FRAG, SKY_VERT } from './shaders'
+import { CUPOLA, ROOMS, STATIONS } from '../model/deck'
 
 export interface DeckFrame {
   eye: [number, number, number]
@@ -12,7 +12,25 @@ export interface DeckFrame {
   alert: number
 }
 
-const FOV = (72 * Math.PI) / 180
+const FOV = (70 * Math.PI) / 180
+const SHADOW_SIZE = 1024
+
+/**
+ * Sunlight direction, pointing from the scene toward the sun.
+ *
+ * The geometry here is the real constraint. The cupola looks at the planet, so
+ * a sun placed beyond the cupola would sit behind the planet and leave the
+ * whole disc in darkness. On the station the sun is off to one side instead,
+ * which is what gives the cupola view its terminator. So the sun is high to
+ * port and only slightly forward: the planet is lit with a terminator across
+ * it, and enough light still comes through the port panes to throw the window
+ * pattern across the command module deck.
+ */
+const SUN: [number, number, number] = (() => {
+  const v: [number, number, number] = [-0.70, 0.66, 0.27]
+  const l = Math.hypot(v[0], v[1], v[2])
+  return [v[0] / l, v[1] / l, v[2] / l]
+})()
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string, label: string): WebGLShader {
   const sh = gl.createShader(type)
@@ -44,29 +62,35 @@ function link(gl: WebGL2RenderingContext, vs: string, fs: string, label: string)
 /**
  * Draws the vessel interior.
  *
- * Three passes, in this order: the sky as a full-screen triangle with depth
- * writes off so it fills the bow aperture and nothing else, the lit structure,
- * then the emissive surfaces added on top. Geometry is built once at
- * construction and never reallocated, so a frame does no allocation at all.
+ * Four passes: a depth-only pass from the sun into a shadow map, the sky and
+ * planet as a full-screen triangle with depth writes off so it is visible only
+ * through the cupola panes, the lit structure, and the emissive surfaces added
+ * over the top. Geometry and the shadow map are built once; a frame allocates
+ * nothing.
  */
 export class DeckRenderer {
   private gl: WebGL2RenderingContext
   private skyProg: WebGLProgram
   private sceneProg: WebGLProgram
   private emisProg: WebGLProgram
+  private depthProg: WebGLProgram
   private emptyVao: WebGLVertexArrayObject | null
   private structVao: WebGLVertexArrayObject | null
   private emisVao: WebGLVertexArrayObject | null
+  private depthVao: WebGLVertexArrayObject | null
   private structBuf: WebGLBuffer | null
   private emisBuf: WebGLBuffer | null
+  private shadowFbo: WebGLFramebuffer | null = null
+  private shadowTex: WebGLTexture | null = null
   private structCount: number
   private emisCount: number
   private lost = false
+  private shadowDrawn = false
 
-  // Scratch, reused every frame.
   private proj: Mat4 = new Float32Array(16)
   private view: Mat4 = new Float32Array(16)
   private viewProj: Mat4 = new Float32Array(16)
+  private lightViewProj: Mat4 = new Float32Array(16)
   private lightPos: Float32Array
   private lightCol: Float32Array
   private lightCount: number
@@ -88,11 +112,13 @@ export class DeckRenderer {
     this.skyProg = link(gl, SKY_VERT, SKY_FRAG, 'Sky')
     this.sceneProg = link(gl, SCENE_VERT, SCENE_FRAG, 'Scene')
     this.emisProg = link(gl, SCENE_VERT, EMISSIVE_FRAG, 'Emissive')
+    this.depthProg = link(gl, DEPTH_VERT, DEPTH_FRAG, 'Depth')
 
     for (const [name, prog, names] of [
-      ['sky', this.skyProg, ['uRight', 'uUp', 'uFwd', 'uAspect', 'uTanHalfFov', 'uTime', 'uPlanetDir', 'uPlanetRadius', 'uSunDir']],
-      ['scene', this.sceneProg, ['uViewProj', 'uLightPos', 'uLightCol', 'uLightCount', 'uEye', 'uAlert']],
-      ['emis', this.emisProg, ['uViewProj', 'uTime', 'uAlert']],
+      ['sky', this.skyProg, ['uRight', 'uUp', 'uFwd', 'uAspect', 'uTanHalfFov', 'uTime', 'uEarthDir', 'uEarthDist', 'uEarthR', 'uSunDir']],
+      ['scene', this.sceneProg, ['uViewProj', 'uLightViewProj', 'uLightPos', 'uLightCol', 'uLightCount', 'uEye', 'uAlert', 'uSunDir', 'uSunCol', 'uShadow', 'uShadowTexel', 'uEarthTint', 'uCupola']],
+      ['emis', this.emisProg, ['uViewProj', 'uLightViewProj', 'uTime', 'uAlert']],
+      ['depth', this.depthProg, ['uLightViewProj']],
     ] as const) {
       this.u[name] = {}
       for (const n of names) this.u[name][n] = gl.getUniformLocation(prog, n)
@@ -106,30 +132,67 @@ export class DeckRenderer {
     this.emisBuf = gl.createBuffer()
     this.structVao = this.makeVao(structure, this.structBuf)
     this.emisVao = this.makeVao(emissive, this.emisBuf)
+    this.depthVao = this.makeDepthVao(this.structBuf)
     this.emptyVao = gl.createVertexArray()
 
-    // Point lights: one per console screen, plus a run down the spine.
+    this.setupShadow()
+
+    // Interior fixtures: one light per deck-head run, one per console screen.
     const pts: number[] = []
     const cols: number[] = []
+    for (const r of ROOMS) {
+      const along = axisOf(r)
+      const a0 = along === 'z' ? r.z0 : r.x0
+      const a1 = along === 'z' ? r.z1 : r.x1
+      const cu = along === 'z' ? (r.x0 + r.x1) / 2 : (r.z0 + r.z1) / 2
+      const n = Math.max(1, Math.round((a1 - a0) / 5.2))
+      for (let i = 0; i < n; i++) {
+        const t = a0 + ((a1 - a0) * (i + 0.5)) / n
+        pts.push(along === 'z' ? cu : t, r.height - 0.32, along === 'z' ? t : cu)
+        // Slightly warm, as fluorescent fixtures in the references read.
+        cols.push(0.82, 0.8, 0.74)
+      }
+    }
     for (const s of STATIONS) {
-      pts.push(s.x - Math.sin(s.facing) * 0.6, 1.5, s.z - Math.cos(s.facing) * 0.6)
-      cols.push(0.2, 0.42, 0.52)
+      pts.push(s.x - Math.sin(s.facing) * 0.55, 1.35, s.z - Math.cos(s.facing) * 0.55)
+      cols.push(0.1, 0.21, 0.3)
     }
-    for (const z of [-11, -4, 3, 10, 17, 22]) {
-      pts.push(0, 2.75, z)
-      cols.push(0.26, 0.29, 0.34)
-    }
-    this.lightCount = Math.min(12, cols.length / 3)
+    this.lightCount = Math.min(16, cols.length / 3)
     this.lightPos = new Float32Array(pts.slice(0, this.lightCount * 3))
     this.lightCol = new Float32Array(cols.slice(0, this.lightCount * 3))
 
     gl.enable(gl.DEPTH_TEST)
-    // Deliberately double-sided. The interior is built from four wall
-    // orientations plus floors and deck-heads, and a single reversed winding
-    // would silently delete a wall. The fragment shader flips the normal for
-    // back faces, so lighting stays correct without depending on winding.
+    // Double-sided by design: the interior is emitted in several wall
+    // orientations, and a reversed winding would silently delete a face. The
+    // fragment shader faces the normal toward the viewer instead.
     gl.disable(gl.CULL_FACE)
     gl.clearColor(0, 0, 0, 1)
+  }
+
+  private setupShadow(): void {
+    const gl = this.gl
+    this.shadowTex = gl.createTexture()
+    gl.bindTexture(gl.TEXTURE_2D, this.shadowTex)
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL)
+    this.shadowFbo = gl.createFramebuffer()
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFbo)
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this.shadowTex, 0)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+
+    // The sun only reaches the command module, so the map covers that volume
+    // rather than the whole vessel: 1024 texels over 16 m is a sharp shadow.
+    const cmd = ROOMS[1]
+    const target: [number, number, number] = [CUPOLA.x, 1.3, cmd.z0 + 2]
+    const eye: [number, number, number] = [target[0] + SUN[0] * 18, target[1] + SUN[1] * 18, target[2] + SUN[2] * 18]
+    const lv = lookAt(eye, target, [0, 1, 0])
+    const lp = orthographic(-8.5, 8.5, -5.5, 5.5, 0.5, 42)
+    multiply(lp, lv, this.lightViewProj)
   }
 
   private makeVao(mesh: MeshData, buf: WebGLBuffer | null): WebGLVertexArrayObject | null {
@@ -138,18 +201,32 @@ export class DeckRenderer {
     gl.bindVertexArray(vao)
     gl.bindBuffer(gl.ARRAY_BUFFER, buf)
     gl.bufferData(gl.ARRAY_BUFFER, mesh.vertices, gl.STATIC_DRAW)
-    const stride = 9 * 4
-    gl.enableVertexAttribArray(0)
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0)
-    gl.enableVertexAttribArray(1)
-    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * 4)
-    gl.enableVertexAttribArray(2)
-    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, stride, 6 * 4)
+    const stride = FLOATS_PER_VERTEX * 4
+    for (const [loc, size, off] of [
+      [0, 3, 0],
+      [1, 3, 3 * 4],
+      [2, 3, 6 * 4],
+      [3, 3, 9 * 4],
+    ] as const) {
+      gl.enableVertexAttribArray(loc)
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride, off)
+    }
     gl.bindVertexArray(null)
     return vao
   }
 
-  /** Triangle count, for the diagnostics readout. */
+  /** Position-only binding of the structure buffer, for the shadow pass. */
+  private makeDepthVao(buf: WebGLBuffer | null): WebGLVertexArrayObject | null {
+    const gl = this.gl
+    const vao = gl.createVertexArray()
+    gl.bindVertexArray(vao)
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, FLOATS_PER_VERTEX * 4, 0)
+    gl.bindVertexArray(null)
+    return vao
+  }
+
   get triangles(): number {
     return (this.structCount + this.emisCount) / 3
   }
@@ -159,28 +236,42 @@ export class DeckRenderer {
     if (this.canvas.height !== heightPx) this.canvas.height = heightPx
   }
 
+  /** The structure and the sun never move, so the map is drawn once. */
+  private drawShadow(): void {
+    const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFbo)
+    gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE)
+    gl.clear(gl.DEPTH_BUFFER_BIT)
+    gl.useProgram(this.depthProg)
+    gl.uniformMatrix4fv(this.u.depth.uLightViewProj, false, this.lightViewProj)
+    gl.bindVertexArray(this.depthVao)
+    gl.drawArrays(gl.TRIANGLES, 0, this.structCount)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    this.shadowDrawn = true
+  }
+
   render(f: DeckFrame): void {
     if (this.lost) return
     const gl = this.gl
     const w = gl.drawingBufferWidth
     const h = gl.drawingBufferHeight
     if (w === 0 || h === 0) return
+    if (!this.shadowDrawn) this.drawShadow()
     const aspect = w / h
 
     gl.viewport(0, 0, w, h)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-    perspective(FOV, aspect, 0.05, 220, this.proj)
+    perspective(FOV, aspect, 0.04, 200, this.proj)
     fpsView(f.eye[0], f.eye[1], f.eye[2], f.yaw, f.pitch, this.view)
     multiply(this.proj, this.view, this.viewProj)
 
-    // ---- sky, behind everything
+    // ---- sky and planet, behind everything
     gl.depthMask(false)
     gl.disable(gl.DEPTH_TEST)
     gl.useProgram(this.skyProg)
     gl.bindVertexArray(this.emptyVao)
     const fwd = forward(f.yaw, f.pitch)
-    // Right and up derived from the same yaw/pitch so the sky tracks the view.
     const right: [number, number, number] = [Math.cos(f.yaw), 0, -Math.sin(f.yaw)]
     const up: [number, number, number] = [
       right[1] * fwd[2] - right[2] * fwd[1],
@@ -194,10 +285,13 @@ export class DeckRenderer {
     gl.uniform1f(su.uAspect, aspect)
     gl.uniform1f(su.uTanHalfFov, Math.tan(FOV / 2))
     gl.uniform1f(su.uTime, f.time)
-    // The destination sits off the bow, a little to port and below the horizon.
-    gl.uniform3f(su.uPlanetDir, -0.42, 0.02, 0.907)
-    gl.uniform1f(su.uPlanetRadius, 0.3)
-    gl.uniform3f(su.uSunDir, 0.55, 0.42, 0.72)
+    // Units of 1000 km. The planet sits off the bow and below, so looking
+    // forward through the cupola puts the limb across the upper panes and the
+    // ground across the lower ones, which is the cupola view.
+    gl.uniform3f(su.uEarthDir, 0.0, -0.62, 0.785)
+    gl.uniform1f(su.uEarthDist, 6.79)
+    gl.uniform1f(su.uEarthR, 6.371)
+    gl.uniform3f(su.uSunDir, SUN[0], SUN[1], SUN[2])
     gl.drawArrays(gl.TRIANGLES, 0, 3)
 
     // ---- lit structure
@@ -206,11 +300,20 @@ export class DeckRenderer {
     gl.useProgram(this.sceneProg)
     const cu = this.u.scene
     gl.uniformMatrix4fv(cu.uViewProj, false, this.viewProj)
+    gl.uniformMatrix4fv(cu.uLightViewProj, false, this.lightViewProj)
     gl.uniform3fv(cu.uLightPos, this.lightPos)
     gl.uniform3fv(cu.uLightCol, this.lightCol)
     gl.uniform1i(cu.uLightCount, this.lightCount)
     gl.uniform3f(cu.uEye, f.eye[0], f.eye[1], f.eye[2])
     gl.uniform1f(cu.uAlert, f.alert)
+    gl.uniform3f(cu.uSunDir, SUN[0], SUN[1], SUN[2])
+    gl.uniform3f(cu.uSunCol, 3.4, 3.26, 3.0)
+    gl.uniform3f(cu.uEarthTint, 0.09, 0.15, 0.24)
+    gl.uniform3f(cu.uCupola, CUPOLA.x, CUPOLA.y, CUPOLA.z)
+    gl.uniform1f(cu.uShadowTexel, 1 / SHADOW_SIZE)
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.shadowTex)
+    gl.uniform1i(cu.uShadow, 0)
     gl.bindVertexArray(this.structVao)
     gl.drawArrays(gl.TRIANGLES, 0, this.structCount)
 
@@ -221,6 +324,7 @@ export class DeckRenderer {
     gl.useProgram(this.emisProg)
     const eu = this.u.emis
     gl.uniformMatrix4fv(eu.uViewProj, false, this.viewProj)
+    gl.uniformMatrix4fv(eu.uLightViewProj, false, this.lightViewProj)
     gl.uniform1f(eu.uTime, f.time)
     gl.uniform1f(eu.uAlert, f.alert)
     gl.bindVertexArray(this.emisVao)
@@ -238,12 +342,18 @@ export class DeckRenderer {
     if (this.emisBuf) gl.deleteBuffer(this.emisBuf)
     if (this.structVao) gl.deleteVertexArray(this.structVao)
     if (this.emisVao) gl.deleteVertexArray(this.emisVao)
+    if (this.depthVao) gl.deleteVertexArray(this.depthVao)
     if (this.emptyVao) gl.deleteVertexArray(this.emptyVao)
+    if (this.shadowFbo) gl.deleteFramebuffer(this.shadowFbo)
+    if (this.shadowTex) gl.deleteTexture(this.shadowTex)
     gl.deleteProgram(this.skyProg)
     gl.deleteProgram(this.sceneProg)
     gl.deleteProgram(this.emisProg)
+    gl.deleteProgram(this.depthProg)
     this.structBuf = this.emisBuf = null
-    this.structVao = this.emisVao = this.emptyVao = null
+    this.structVao = this.emisVao = this.depthVao = this.emptyVao = null
+    this.shadowFbo = null
+    this.shadowTex = null
   }
 }
 

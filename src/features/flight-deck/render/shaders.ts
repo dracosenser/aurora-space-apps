@@ -4,13 +4,66 @@
  * Note for anyone editing these: the shader bodies live inside template
  * literals, so a backtick anywhere in a comment below would end the literal
  * and break the build. Write comments without them.
+ *
+ * On ray tracing: WebGL2 has no ray-tracing pipeline, so nothing here traces
+ * rays through the interior. What it does instead is the set of things that
+ * actually produce that look at sixty frames a second — a microfacet BRDF with
+ * real roughness and metalness, a shadow map so sunlight through the cupola
+ * throws the window pattern across the deck, ambient occlusion baked per
+ * vertex against the deck plan, and a hemispheric ambient term standing in for
+ * bounce off the white rack faces. The planet is the one thing genuinely
+ * traced: an analytic ray-sphere intersection evaluated per pixel.
  */
 
-// --------------------------------------------------------------------- sky
-// Drawn first as a full-screen triangle with depth writes off, so it shows
-// through the bow aperture and nowhere else. There is no skybox texture: the
-// starfield and the planet are evaluated per pixel from the view ray.
+const PBR_COMMON = /* glsl */ `
+const float PI = 3.14159265359;
 
+float distributionGGX(vec3 N, vec3 H, float rough) {
+  float a = rough * rough;
+  float a2 = a * a;
+  float ndh = max(dot(N, H), 0.0);
+  float d = ndh * ndh * (a2 - 1.0) + 1.0;
+  return a2 / max(PI * d * d, 1e-5);
+}
+
+float geometrySchlick(float ndv, float rough) {
+  float r = rough + 1.0;
+  float k = (r * r) / 8.0;
+  return ndv / (ndv * (1.0 - k) + k);
+}
+
+float geometrySmith(float ndv, float ndl, float rough) {
+  return geometrySchlick(ndv, rough) * geometrySchlick(ndl, rough);
+}
+
+vec3 fresnelSchlick(float cosT, vec3 f0) {
+  return f0 + (1.0 - f0) * pow(clamp(1.0 - cosT, 0.0, 1.0), 5.0);
+}
+
+// ACES approximation. Keeps highlights off white panels from going chalky when
+// sunlight comes through the cupola.
+vec3 tonemapACES(vec3 x) {
+  const float a = 2.51;
+  const float b = 0.03;
+  const float c = 2.43;
+  const float d = 0.59;
+  const float e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+`
+
+// ------------------------------------------------------------- shadow pass
+export const DEPTH_VERT = /* glsl */ `#version 300 es
+precision highp float;
+layout(location = 0) in vec3 aPos;
+uniform mat4 uLightViewProj;
+void main() { gl_Position = uLightViewProj * vec4(aPos, 1.0); }`
+
+export const DEPTH_FRAG = /* glsl */ `#version 300 es
+precision highp float;
+void main() {}`
+
+// --------------------------------------------------------------- sky/Earth
 export const SKY_VERT = /* glsl */ `#version 300 es
 precision highp float;
 out vec2 vNdc;
@@ -32,8 +85,9 @@ uniform vec3 uFwd;
 uniform float uAspect;
 uniform float uTanHalfFov;
 uniform float uTime;
-uniform vec3 uPlanetDir;     // unit vector toward the planet
-uniform float uPlanetRadius; // angular radius, radians
+uniform vec3 uEarthDir;
+uniform float uEarthDist;
+uniform float uEarthR;
 uniform vec3 uSunDir;
 
 float hash31(vec3 p) {
@@ -46,167 +100,265 @@ float noise3(vec3 p) {
   vec3 i = floor(p);
   vec3 f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
-  float n000 = hash31(i);
-  float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
-  float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
-  float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
-  float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
-  float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
-  float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
-  float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
-  return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
-             mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+  return mix(mix(mix(hash31(i), hash31(i + vec3(1,0,0)), f.x),
+                 mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), f.x),
+                 mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 
-float fbm3(vec3 p) {
+float fbm(vec3 p, int oct) {
   float s = 0.0;
   float a = 0.5;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 8; i++) {
+    if (i >= oct) break;
     s += a * noise3(p);
-    p *= 2.07;
+    p *= 2.03;
     a *= 0.5;
   }
   return s;
 }
 
+// Rotation about Y: the ground drifting under the orbit.
+vec3 spin(vec3 p, float a) {
+  float c = cos(a);
+  float s = sin(a);
+  return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+}
+
 void main() {
   vec3 dir = normalize(uFwd + uRight * (vNdc.x * uAspect * uTanHalfFov) + uUp * (vNdc.y * uTanHalfFov));
 
-  // Starfield: quantise the direction into cells and light a few of them.
-  vec3 cell = floor(dir * 260.0);
+  // ---- starfield
+  vec3 cell = floor(dir * 300.0);
   float star = hash31(cell);
-  float brightness = smoothstep(0.9965, 1.0, star);
-  // A slow scintillation, different per star so they do not blink together.
-  float twinkle = 0.75 + 0.25 * sin(uTime * 1.3 + star * 90.0);
-  vec3 col = vec3(brightness * twinkle);
-  // A few warmer and cooler stars rather than a field of identical white.
-  col *= mix(vec3(0.75, 0.84, 1.0), vec3(1.0, 0.9, 0.78), hash31(cell + 3.1));
+  float bright = smoothstep(0.9972, 1.0, star);
+  float twinkle = 0.8 + 0.2 * sin(uTime * 1.1 + star * 90.0);
+  vec3 col = vec3(bright * twinkle) * mix(vec3(0.76, 0.84, 1.0), vec3(1.0, 0.9, 0.78), hash31(cell + 3.1));
 
-  // Faint band of distant light, so the window is never a dead black rectangle.
-  float band = exp(-abs(dir.y) * 3.4) * 0.022;
-  col += vec3(0.30, 0.36, 0.52) * band;
+  vec3 C = uEarthDir * uEarthDist;
+  float b = dot(dir, C);
+  float cc = dot(C, C);
+  float disc = b * b - (cc - uEarthR * uEarthR);
+  float atmoR = uEarthR * 1.025;
+  float discA = b * b - (cc - atmoR * atmoR);
 
-  // The planet.
-  float cosAng = dot(dir, uPlanetDir);
-  float cosR = cos(uPlanetRadius);
-  if (cosAng > cosR) {
-    // Reconstruct a surface normal from where the ray lands on the disc.
-    float ang = acos(clamp(cosAng, -1.0, 1.0));
-    float k = ang / uPlanetRadius;            // 0 at centre, 1 at limb
-    vec3 toEdge = normalize(dir - uPlanetDir * cosAng);
-    float sinN = clamp(k, 0.0, 1.0);
-    vec3 n = normalize(uPlanetDir * sqrt(max(0.0, 1.0 - sinN * sinN)) * -1.0 + toEdge * sinN);
-    n = normalize(mix(-uPlanetDir, n, 1.0));
+  if (disc > 0.0 && b > 0.0) {
+    vec3 pos = dir * (b - sqrt(disc));
+    vec3 n = normalize(pos - C);
+    vec3 ns = spin(n, uTime * 0.0045);
 
-    float lambert = clamp(dot(n, uSunDir), 0.0, 1.0);
-    // Terminator softened a little, as an atmosphere would.
-    lambert = pow(lambert, 0.85);
+    float sun = dot(n, uSunDir);
+    float day = smoothstep(-0.10, 0.24, sun);
 
-    vec3 surface = vec3(0.42, 0.22, 0.13);
-    float bands = fbm3(n * 4.2 + vec3(0.0, uTime * 0.004, 0.0));
-    surface = mix(surface, vec3(0.56, 0.34, 0.2), bands);
-    // Polar brightening and a dark basin or two.
-    surface = mix(surface, vec3(0.78, 0.76, 0.72), smoothstep(0.72, 0.95, abs(n.y)) * 0.75);
-    surface = mix(surface, vec3(0.3, 0.16, 0.1), smoothstep(0.55, 0.8, fbm3(n * 2.1 + 11.0)) * 0.5);
+    // Continents. The scale matters more than anything else here: ns is a unit
+    // vector, so a low multiplier gives only a handful of noise cells over the
+    // whole globe and the planet turns to blobs. These are tuned so the land
+    // masses are continent-sized and the coastlines carry fine detail.
+    // From a 420 km orbit a single screen covers a small patch of the globe,
+    // so continent-scale noise alone reads as smooth blobs. These run to seven
+    // and five octaves respectively, which carries the terrain down to
+    // something like coastline scale at this altitude.
+    float land = fbm(ns * 3.4, 7);
+    float detail = fbm(ns * 38.0, 5);
+    float mask = smoothstep(0.545, 0.60, land + detail * 0.06);
 
-    vec3 lit = surface * (lambert * 1.18 + 0.025);
-    // Limb haze
-    float limb = smoothstep(0.86, 1.0, k);
-    lit += vec3(0.5, 0.33, 0.26) * limb * lambert * 0.5;
+    vec3 ocean = mix(vec3(0.006, 0.028, 0.085), vec3(0.016, 0.075, 0.20), smoothstep(0.3, 0.62, land));
+    vec3 green = mix(vec3(0.052, 0.082, 0.040), vec3(0.145, 0.138, 0.075), detail);
+    vec3 arid = vec3(0.315, 0.245, 0.135);
+    vec3 ground = mix(green, arid, smoothstep(0.42, 0.70, fbm(ns * 9.0 + 19.0, 4)));
+    vec3 surface = mix(ocean, ground, mask);
+    float lat = abs(ns.y);
+    surface = mix(surface, vec3(0.74, 0.78, 0.84), smoothstep(0.82, 0.96, lat));
 
-    float edge = 1.0 - smoothstep(0.985, 1.0, k);
-    col = mix(col, lit, edge);
+    // Cloud deck, drifting independently of the ground.
+    vec3 cp = spin(n, uTime * 0.0045 + 0.4) * 9.0 + vec3(uTime * 0.006, 0.0, 0.0);
+    float cloud = smoothstep(0.50, 0.78, fbm(cp, 6));
+    cloud *= 0.5 + 0.5 * smoothstep(0.15, 0.65, fbm(cp * 3.1, 4));
+    cloud *= 0.6 + 0.6 * smoothstep(0.05, 0.4, abs(sin(ns.y * 3.1)));
+    cloud = clamp(cloud, 0.0, 1.0);
+
+    float ndv = clamp(dot(n, -dir), 0.0, 1.0);
+    float oceanSpec = (1.0 - mask) * pow(1.0 - ndv, 4.0);
+    float specular = pow(max(dot(reflect(-uSunDir, n), -dir), 0.0), 60.0) * oceanSpec * 3.0;
+
+    vec3 lit = surface * day * 1.0;
+    lit = mix(lit, vec3(0.86, 0.885, 0.93) * day, cloud * 0.93);
+    lit += vec3(1.0, 0.96, 0.9) * specular * day * 0.8;
+
+    // Night side: city lights on land, faint airglow elsewhere
+    float night = 1.0 - day;
+    float cities = mask * smoothstep(0.62, 0.80, fbm(ns * 70.0, 4)) * smoothstep(0.0, 0.35, 1.0 - lat);
+    lit += vec3(1.0, 0.72, 0.36) * cities * night * 0.5 * (1.0 - cloud * 0.8);
+    lit += vec3(0.035, 0.085, 0.14) * night * 0.12;
+
+    // Atmosphere thickening toward the limb
+    lit += vec3(0.20, 0.38, 0.78) * pow(1.0 - ndv, 2.8) * day * 0.75;
+
+    col = lit;
+  } else if (discA > 0.0 && b > 0.0) {
+    // Grazes the atmosphere but misses the ground: the blue rim.
+    vec3 n = normalize(dir * (b - sqrt(discA)) - C);
+    float sun = smoothstep(-0.25, 0.35, dot(n, uSunDir));
+    float thick = sqrt(discA) / max(atmoR - uEarthR, 1e-4) * 0.5;
+    float glow = exp(-thick * 1.1) * sun;
+    col += vec3(0.22, 0.45, 0.95) * glow * 1.3;
+    col += vec3(0.6, 0.78, 1.0) * pow(glow, 3.0) * 0.55;
   }
 
+  // Same filmic curve as the interior, so the planet rolls off into highlight
+  // instead of clipping to paper white at the sub-solar point.
+  col = clamp((col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14), 0.0, 1.0);
+  col = pow(col, vec3(0.4545));
   outColor = vec4(col, 1.0);
 }`
 
 // ------------------------------------------------------------------- scene
-// One pass over the interior. A cool key from the deck-head, a dim fill, and
-// a handful of point lights standing in for the console screens, which is what
-// makes the consoles pool light onto the deck around them.
-
 export const SCENE_VERT = /* glsl */ `#version 300 es
 precision highp float;
 
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec3 aColor;
+layout(location = 3) in vec3 aMat;
 
 uniform mat4 uViewProj;
+uniform mat4 uLightViewProj;
 
 out vec3 vPos;
 out vec3 vNormal;
 out vec3 vColor;
+out vec3 vMat;
+out vec4 vLightPos;
 
 void main() {
   vPos = aPos;
   vNormal = aNormal;
   vColor = aColor;
+  vMat = aMat;
+  vLightPos = uLightViewProj * vec4(aPos, 1.0);
   gl_Position = uViewProj * vec4(aPos, 1.0);
 }`
 
 export const SCENE_FRAG = /* glsl */ `#version 300 es
 precision highp float;
+precision highp sampler2DShadow;
 
 in vec3 vPos;
 in vec3 vNormal;
 in vec3 vColor;
+in vec3 vMat;
+in vec4 vLightPos;
 out vec4 outColor;
 
-const int MAX_LIGHTS = 12;
+${PBR_COMMON}
+
+const int MAX_LIGHTS = 16;
 uniform vec3 uLightPos[MAX_LIGHTS];
 uniform vec3 uLightCol[MAX_LIGHTS];
 uniform int uLightCount;
 uniform vec3 uEye;
-uniform float uAlert;   // 0..1, raised when the engine has something to say
+uniform float uAlert;
+uniform vec3 uSunDir;
+uniform vec3 uSunCol;
+uniform sampler2DShadow uShadow;
+uniform float uShadowTexel;
+uniform vec3 uEarthTint;
+uniform vec3 uCupola;
+
+float sunShadow() {
+  vec3 p = vLightPos.xyz / vLightPos.w;
+  p = p * 0.5 + 0.5;
+  if (p.z > 1.0 || p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return 0.0;
+  // Percentage-closer filtering. A 3x3 tap turns the window edges into
+  // something nearer a penumbra than a stencil.
+  float s = 0.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      s += texture(uShadow, vec3(p.xy + vec2(float(x), float(y)) * uShadowTexel, p.z - 0.0022));
+    }
+  }
+  return s / 9.0;
+}
 
 void main() {
-  vec3 n = normalize(vNormal);
-  // Geometry is double-sided; face the normal toward the viewer.
-  if (!gl_FrontFacing) n = -n;
+  vec3 N = normalize(vNormal);
+  if (!gl_FrontFacing) N = -N;
+  vec3 V = normalize(uEye - vPos);
+  float ndv = max(dot(N, V), 1e-4);
+
   vec3 albedo = vColor;
+  float rough = clamp(vMat.x, 0.06, 1.0);
+  float metal = clamp(vMat.y, 0.0, 1.0);
+  float ao = clamp(vMat.z, 0.0, 1.0);
 
-  // Ambient, slightly stronger looking up: the deck-head runs carry the room.
-  float sky = 0.5 + 0.5 * n.y;
-  vec3 col = albedo * mix(vec3(0.052, 0.056, 0.07), vec3(0.14, 0.152, 0.175), sky);
+  vec3 f0 = mix(vec3(0.04), albedo, metal);
+  vec3 kd = albedo * (1.0 - metal);
+  vec3 lo = vec3(0.0);
 
+  // Sunlight through the cupola, shadow-mapped.
+  vec3 L = normalize(uSunDir);
+  float ndl = max(dot(N, L), 0.0);
+  if (ndl > 0.0) {
+    float shadow = sunShadow();
+    if (shadow > 0.0) {
+      vec3 H = normalize(L + V);
+      float D = distributionGGX(N, H, rough);
+      float G = geometrySmith(ndv, ndl, rough);
+      vec3 F = fresnelSchlick(max(dot(H, V), 0.0), f0);
+      vec3 spec = (D * G * F) / max(4.0 * ndv * ndl, 1e-4);
+      lo += (kd / PI + spec) * uSunCol * ndl * shadow;
+    }
+  }
+
+  // Interior fixtures.
   for (int i = 0; i < MAX_LIGHTS; i++) {
     if (i >= uLightCount) break;
     vec3 d = uLightPos[i] - vPos;
-    float dist2 = dot(d, d);
-    vec3 l = d * inversesqrt(max(dist2, 1e-4));
-    float lambert = clamp(dot(n, l), 0.0, 1.0);
-    // Inverse-square with a soft floor so nothing blows out up close.
-    float atten = 1.0 / (1.0 + dist2 * 0.42);
-    col += albedo * uLightCol[i] * lambert * atten;
-
-    // A tight specular lifts the metal trim without a texture.
-    vec3 v = normalize(uEye - vPos);
-    vec3 h = normalize(l + v);
-    float spec = pow(clamp(dot(n, h), 0.0, 1.0), 48.0);
-    col += uLightCol[i] * spec * atten * 0.1;
+    float dist2 = max(dot(d, d), 1e-4);
+    // The vessel is forty metres long, so most fixtures are nowhere near any
+    // given fragment. Attenuation at this range is already down to about three
+    // per cent, so culling here is free visually and skips the whole BRDF.
+    if (dist2 > 90.0) continue;
+    vec3 Li = d * inversesqrt(dist2);
+    float nl = max(dot(N, Li), 0.0);
+    if (nl <= 0.0) continue;
+    float atten = 1.0 / (1.0 + dist2 * 0.33);
+    vec3 H = normalize(Li + V);
+    float D = distributionGGX(N, H, rough);
+    float G = geometrySmith(ndv, nl, rough);
+    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), f0);
+    vec3 spec = (D * G * F) / max(4.0 * ndv * nl, 1e-4);
+    lo += (kd / PI + spec) * uLightCol[i] * nl * atten;
   }
 
-  // When something needs attention the deck picks up a trace of amber. It is
-  // deliberately slight: this is a status cue, not an alarm.
-  col = mix(col, col * vec3(1.25, 1.02, 0.72), uAlert * 0.35);
+  // Ambient: a hemisphere standing in for bounce off the white rack faces,
+  // plus a cool wash from the planet in through the cupola.
+  vec3 ambient = mix(vec3(0.050, 0.050, 0.055), vec3(0.112, 0.118, 0.132), N.y * 0.5 + 0.5) * albedo * ao;
 
-  // Filmic-ish compression, then a gentle lift so the blacks are not crushed.
-  col = col / (col + vec3(0.72));
+  vec3 toCupola = uCupola - vPos;
+  float cupDist2 = max(dot(toCupola, toCupola), 1.0);
+  vec3 cupL = toCupola * inversesqrt(cupDist2);
+  ambient += uEarthTint * albedo * max(dot(N, cupL), 0.0) * ao * (14.0 / (14.0 + cupDist2));
+
+  // A grazing sheen, so painted metal does not read as matte paper.
+  ambient += fresnelSchlick(ndv, f0) * (1.0 - rough) * 0.085 * ao;
+
+  vec3 col = lo + ambient;
+  col = mix(col, col * vec3(1.2, 1.01, 0.76), uAlert * 0.3);
+  col = tonemapACES(col * 1.08);
   col = pow(col, vec3(0.4545));
   outColor = vec4(col, 1.0);
 }`
 
 // ---------------------------------------------------------------- emissive
-// Screens and light runs, drawn without lighting and added to the frame.
-
 export const EMISSIVE_FRAG = /* glsl */ `#version 300 es
 precision highp float;
 
 in vec3 vPos;
 in vec3 vNormal;
 in vec3 vColor;
+in vec3 vMat;
+in vec4 vLightPos;
 out vec4 outColor;
 
 uniform float uTime;
@@ -220,31 +372,20 @@ float hash21(vec2 p) {
 
 void main() {
   vec3 col = vColor;
-
-  // Upright faces are screens; the deck-head runs are flat and stay smooth.
   float upright = 1.0 - abs(normalize(vNormal).y);
 
-  // Rows of unequal brightness, so a console reads as a display with content
-  // on it rather than as a lamp. At this distance that is all the eye needs.
-  float row = floor(vPos.y * 26.0);
-  float rowLum = 0.42 + 0.58 * hash21(vec2(row, 2.3));
-  float gap = smoothstep(0.52, 0.72, fract(vPos.y * 26.0));
-  col *= mix(1.0, rowLum * (1.0 - gap * 0.55), upright);
+  // Upright faces are displays: rows of unequal brightness read as content.
+  float row = floor(vPos.y * 30.0);
+  float rowLum = 0.45 + 0.55 * hash21(vec2(row, 2.3));
+  float gap = smoothstep(0.55, 0.75, fract(vPos.y * 30.0));
+  col *= mix(1.0, rowLum * (1.0 - gap * 0.5), upright);
+  col *= 1.0 + upright * smoothstep(1.5, 1.57, vPos.y) * 0.7;
+  col *= 1.0 - upright * (0.5 + 0.5 * sin(vPos.y * 210.0)) * 0.12;
+  col += col * smoothstep(0.88, 1.0, sin(vPos.y * 2.0 - uTime * 0.8)) * 0.22 * upright;
+  col += (hash21(vPos.xy * 90.0 + floor(uTime * 12.0)) - 0.5) * 0.016;
 
-  // A header band across the top of each screen.
-  col *= 1.0 + upright * smoothstep(1.72, 1.8, vPos.y) * 0.8;
-
-  float lines = 0.5 + 0.5 * sin(vPos.y * 190.0);
-  col *= 1.0 - upright * lines * 0.14;
-
-  // A slow horizontal refresh, and a little static, both very faint.
-  float sweep = smoothstep(0.86, 1.0, sin(vPos.y * 2.1 - uTime * 0.85));
-  col += col * sweep * 0.28 * upright;
-  col += (hash21(vPos.xy * 90.0 + floor(uTime * 12.0)) - 0.5) * 0.02;
-
-  col = mix(col, vec3(0.62, 0.42, 0.16), uAlert * 0.55 * upright);
-
-  col = col / (col + vec3(0.72));
+  col = mix(col, vec3(0.6, 0.4, 0.14), uAlert * 0.5 * upright);
+  col = col / (col + vec3(0.8));
   col = pow(col, vec3(0.4545));
   outColor = vec4(col, 1.0);
 }`

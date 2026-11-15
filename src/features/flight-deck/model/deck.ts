@@ -22,6 +22,12 @@ export interface Room {
   z1: number
   /** Deck-head height for this compartment. */
   height: number
+  /**
+   * Axis the module runs on. Defaults to the longer side, which is right for
+   * every compartment except the command module: that one is wider than it is
+   * deep, but its forward face carries the cupola rather than rack bays.
+   */
+  along?: 'x' | 'z'
 }
 
 export type StationId = 'navigation' | 'medical' | 'crew' | 'environment' | 'comms'
@@ -42,13 +48,20 @@ export interface Station {
   bay: string
 }
 
+/**
+ * Module scale follows the ISS US segment: Destiny is about 4.2 m across, with
+ * roughly 2 m of clear space between the rack faces. These spans are a little
+ * more generous so a walking camera is not scraping the deck-head, but they are
+ * close enough that the cross-section reads as a pressurised module rather than
+ * as a corridor in a building.
+ */
 export const ROOMS: Room[] = [
-  { id: 'spine', label: 'Spine corridor', x0: -3, x1: 3, z0: -16, z1: 15, height: 3.1 },
-  { id: 'command', label: 'Command deck', x0: -8.5, x1: 8.5, z0: 15, z1: 24, height: 3.8 },
-  { id: 'medical', label: 'Medical bay', x0: 3, x1: 10.5, z0: 4, z1: 12, height: 3.1 },
-  { id: 'crew', label: 'Crew quarters', x0: -10.5, x1: -3, z0: 4, z1: 12, height: 3.1 },
-  { id: 'environment', label: 'Environmental control', x0: 3, x1: 10.5, z0: -13, z1: -5, height: 3.1 },
-  { id: 'comms', label: 'Communications', x0: -10.5, x1: -3, z0: -13, z1: -5, height: 3.1 },
+  { id: 'spine', label: 'Spine corridor', x0: -2.3, x1: 2.3, z0: -16, z1: 15, height: 2.75 },
+  { id: 'command', label: 'Command module', x0: -5.6, x1: 5.6, z0: 15, z1: 23.5, height: 3.3, along: 'z' },
+  { id: 'medical', label: 'Medical bay', x0: 2.3, x1: 8.4, z0: 4.6, z1: 11.4, height: 2.75 },
+  { id: 'crew', label: 'Crew quarters', x0: -8.4, x1: -2.3, z0: 4.6, z1: 11.4, height: 2.75 },
+  { id: 'environment', label: 'Environmental control', x0: 2.3, x1: 8.4, z0: -12.4, z1: -5.6, height: 2.75 },
+  { id: 'comms', label: 'Communications', x0: -8.4, x1: -2.3, z0: -12.4, z1: -5.6, height: 2.75 },
 ]
 
 export const STATIONS: Station[] = [
@@ -56,50 +69,53 @@ export const STATIONS: Station[] = [
     id: 'navigation',
     label: 'Navigation',
     hint: 'Mission profile, elapsed time and the event timeline',
-    x: 0,
-    z: 22.4,
-    facing: 0, // back to the bow wall, screen toward the spine
-    width: 4.2,
+    // Set against the port wall rather than in front of the cupola: the window
+    // is the reason to come to this module, and a console parked in the middle
+    // of it would be standing in the view.
+    x: -3.4,
+    z: 20.4,
+    facing: -Math.PI / 2,
+    width: 3.2,
     bay: 'BAY 01 · NAV',
   },
   {
     id: 'medical',
     label: 'Medical bay',
     hint: 'Crew health, anomalies and the Signal Veil instrument',
-    x: 9.6,
+    x: 7.5,
     z: 8,
     facing: Math.PI / 2,
-    width: 3.6,
+    width: 2.9,
     bay: 'BAY 02 · MED',
   },
   {
     id: 'crew',
     label: 'Crew quarters',
     hint: 'Crew roster, sleep and activity',
-    x: -9.6,
+    x: -7.5,
     z: 8,
     facing: -Math.PI / 2,
-    width: 3.6,
+    width: 2.9,
     bay: 'BAY 03 · CRW',
   },
   {
     id: 'environment',
     label: 'Environmental control',
     hint: 'Cabin atmosphere and the mission scenario model',
-    x: 9.6,
+    x: 7.5,
     z: -9,
     facing: Math.PI / 2,
-    width: 3.6,
+    width: 2.9,
     bay: 'BAY 04 · ECLSS',
   },
   {
     id: 'comms',
     label: 'Communications',
     hint: 'Mission-control traffic and one-way light time',
-    x: -9.6,
+    x: -7.5,
     z: -9,
     facing: -Math.PI / 2,
-    width: 3.6,
+    width: 2.9,
     bay: 'BAY 05 · COMM',
   },
 ]
@@ -109,8 +125,12 @@ export const STATION_BY_ID = Object.fromEntries(STATIONS.map((s) => [s.id, s])) 
 /** Where a crew member enters the deck, and which way they are looking. */
 export const SPAWN = { x: 0, z: -2, yaw: Math.PI }
 
-/** The bow window occupies the forward wall of the command deck. */
-export const WINDOW = { x0: -6.4, x1: 6.4, y0: 1.0, y1: 2.9, z: 24 }
+/**
+ * The cupola: a seven-window observation structure set into the forward
+ * bulkhead of the command module, after the ISS cupola — one circular centre
+ * pane ringed by six trapezoidal ones.
+ */
+export const CUPOLA = { x: 0, y: 1.75, z: 23.5, radius: 2.05, depth: 0.85 }
 
 const EPS = 1e-6
 

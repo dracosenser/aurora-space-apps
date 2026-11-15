@@ -1,250 +1,552 @@
-import { ROOMS, STATIONS, WINDOW, inside, type Room } from '../model/deck'
+import { CUPOLA, ROOMS, STATIONS, inside, type Room } from '../model/deck'
 
 /**
- * Procedural interior. Nothing is loaded from disk: the whole vessel is built
- * from the deck plan at startup into one interleaved buffer, which keeps the
- * draw down to a couple of calls and means there are no assets to ship.
+ * The vessel interior, generated from the deck plan.
  *
- * Vertex layout, 9 floats:
- *   position xyz | normal xyz | albedo rgb
+ * The architectural language is the ISS US segment: a chamfered-octagon
+ * cross-section, payload-rack bays filling the side walls, peach structural
+ * collars at every hatch, blue handrails running the length of each module,
+ * and gridded floor panels over a grated centre run. Nothing is loaded from
+ * disk and no texture is sampled; the detail is geometry.
  *
- * Emissive surfaces are handled by a separate buffer so the shader can skip
- * lighting them, which is what lets screens read as light sources rather than
- * as lit panels.
+ * Vertex layout, 12 floats:
+ *   position xyz | normal xyz | albedo rgb | roughness, metallic, ao
+ *
+ * Albedo is linear; the shader tonemaps and gamma-encodes. Ambient occlusion
+ * is baked per vertex at build time against the deck plan, which is what puts
+ * contact darkening into the corners for nothing at runtime.
  */
 
+export const FLOATS_PER_VERTEX = 12
+
 export interface MeshData {
-  /** Interleaved pos(3) normal(3) colour(3). */
   vertices: Float32Array
   count: number
 }
 
+type Rgb = readonly [number, number, number]
+/** roughness, metallic, ao */
+type Mat = readonly [number, number, number]
+type P3 = [number, number, number]
+
+// ------------------------------------------------------------------ palette
+// Linear values. sRGB 0.85 is roughly linear 0.70.
+const PANEL: Rgb = [0.70, 0.685, 0.645]
+const PANEL_2: Rgb = [0.60, 0.59, 0.555]
+const PEACH: Rgb = [0.80, 0.40, 0.24]
+const PEACH_DK: Rgb = [0.55, 0.26, 0.15]
+const ALLOY: Rgb = [0.50, 0.51, 0.53]
+const DARKMETAL: Rgb = [0.085, 0.088, 0.098]
+const RAIL: Rgb = [0.09, 0.25, 0.45]
+const FLOORPAN: Rgb = [0.42, 0.43, 0.44]
+const GRATE: Rgb = [0.18, 0.185, 0.195]
+const CABLE: Rgb = [0.15, 0.155, 0.165]
+const BAG: Rgb = [0.66, 0.645, 0.60]
+const BAG_2: Rgb = [0.46, 0.48, 0.52]
+const LABEL: Rgb = [0.80, 0.79, 0.75]
+const AMBER_L: Rgb = [0.72, 0.44, 0.08]
+
+const M_PANEL: Mat = [0.62, 0.0, 1]
+const M_SOFT: Mat = [0.9, 0.0, 1]
+const M_METAL: Mat = [0.34, 0.85, 1]
+const M_RAIL: Mat = [0.3, 0.55, 1]
+const M_FRAME: Mat = [0.3, 0.7, 1]
+const M_RUBBER: Mat = [0.95, 0.0, 1]
+const M_FLOOR: Mat = [0.55, 0.25, 1]
+
 class Builder {
-  private v: number[] = []
+  readonly v: number[] = []
 
   get count(): number {
-    return this.v.length / 9
+    return this.v.length / FLOATS_PER_VERTEX
   }
 
   data(): MeshData {
     return { vertices: new Float32Array(this.v), count: this.count }
   }
 
-  /** One triangle, flat-shaded from its own winding. */
-  tri(
-    ax: number, ay: number, az: number,
-    bx: number, by: number, bz: number,
-    cx: number, cy: number, cz: number,
-    r: number, g: number, b: number,
-  ): void {
-    const ux = bx - ax
-    const uy = by - ay
-    const uz = bz - az
-    const vx = cx - ax
-    const vy = cy - ay
-    const vz = cz - az
+  tri(a: P3, b: P3, c: P3, col: Rgb, mat: Mat): void {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2]
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2]
     let nx = uy * vz - uz * vy
     let ny = uz * vx - ux * vz
     let nz = ux * vy - uy * vx
     const len = Math.hypot(nx, ny, nz) || 1
-    nx /= len
-    ny /= len
-    nz /= len
-    this.v.push(ax, ay, az, nx, ny, nz, r, g, b)
-    this.v.push(bx, by, bz, nx, ny, nz, r, g, b)
-    this.v.push(cx, cy, cz, nx, ny, nz, r, g, b)
+    nx /= len; ny /= len; nz /= len
+    const [r, g, bl] = col
+    const [ro, me, ao] = mat
+    for (const p of [a, b, c]) this.v.push(p[0], p[1], p[2], nx, ny, nz, r, g, bl, ro, me, ao)
   }
 
-  quad(
-    ax: number, ay: number, az: number,
-    bx: number, by: number, bz: number,
-    cx: number, cy: number, cz: number,
-    dx: number, dy: number, dz: number,
-    r: number, g: number, b: number,
-  ): void {
-    this.tri(ax, ay, az, bx, by, bz, cx, cy, cz, r, g, b)
-    this.tri(ax, ay, az, cx, cy, cz, dx, dy, dz, r, g, b)
+  quad(a: P3, b: P3, c: P3, d: P3, col: Rgb, mat: Mat): void {
+    this.tri(a, b, c, col, mat)
+    this.tri(a, c, d, col, mat)
   }
 
-  /** Axis-aligned box, inward-facing optional for rooms. */
-  box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, r: number, g: number, b: number): void {
-    this.quad(x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1, r, g, b) // top
-    this.quad(x0, y0, z1, x1, y0, z1, x1, y0, z0, x0, y0, z0, r, g, b) // bottom
-    this.quad(x0, y0, z1, x0, y1, z1, x1, y1, z1, x1, y0, z1, r, g, b) // +z
-    this.quad(x1, y0, z0, x1, y1, z0, x0, y1, z0, x0, y0, z0, r, g, b) // -z
-    this.quad(x1, y0, z1, x1, y1, z1, x1, y1, z0, x1, y0, z0, r, g, b) // +x
-    this.quad(x0, y0, z0, x0, y1, z0, x0, y1, z1, x0, y0, z1, r, g, b) // -x
+  box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, col: Rgb, mat: Mat): void {
+    const X0 = Math.min(x0, x1), X1 = Math.max(x0, x1)
+    const Y0 = Math.min(y0, y1), Y1 = Math.max(y0, y1)
+    const Z0 = Math.min(z0, z1), Z1 = Math.max(z0, z1)
+    this.quad([X0, Y1, Z0], [X1, Y1, Z0], [X1, Y1, Z1], [X0, Y1, Z1], col, mat)
+    this.quad([X0, Y0, Z1], [X1, Y0, Z1], [X1, Y0, Z0], [X0, Y0, Z0], col, mat)
+    this.quad([X0, Y0, Z1], [X0, Y1, Z1], [X1, Y1, Z1], [X1, Y0, Z1], col, mat)
+    this.quad([X1, Y0, Z0], [X1, Y1, Z0], [X0, Y1, Z0], [X0, Y0, Z0], col, mat)
+    this.quad([X1, Y0, Z1], [X1, Y1, Z1], [X1, Y1, Z0], [X1, Y0, Z0], col, mat)
+    this.quad([X0, Y0, Z0], [X0, Y1, Z0], [X0, Y1, Z1], [X0, Y0, Z1], col, mat)
   }
 }
 
-// ---------------------------------------------------------------- palette
-// Matte greys with a cool cast, so the only saturated light in the room comes
-// from the instruments. Values are linear-ish; the shader tonemaps.
-const DECK = [0.085, 0.09, 0.1] as const
-const WALL = [0.13, 0.138, 0.152] as const
-const WALL_LOW = [0.1, 0.105, 0.118] as const
-const RIB = [0.175, 0.185, 0.2] as const
-const TRIM = [0.26, 0.28, 0.3] as const
-const CONSOLE = [0.115, 0.122, 0.135] as const
+/** The axis a module runs on. */
+export function axisOf(r: Room): 'x' | 'z' {
+  return r.along ?? (r.z1 - r.z0 >= r.x1 - r.x0 ? 'z' : 'x')
+}
 
-/** Wall segments are emitted in 0.25 m pieces so doorways appear by omission. */
-const SEG = 0.25
+/** Deterministic, so the vessel is identical on every load. */
+function rnd(seed: number): number {
+  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453
+  return x - Math.floor(x)
+}
 
-function wallRun(
-  b: Builder,
-  fixed: 'x' | 'z',
-  fixedValue: number,
-  from: number,
-  to: number,
-  height: number,
-  outward: 1 | -1,
-): void {
-  const n = Math.max(1, Math.round((to - from) / SEG))
-  const step = (to - from) / n
-  for (let i = 0; i < n; i++) {
-    const a = from + i * step
-    const c = a + step
-    const mid = (a + c) / 2
-    // If the space just outside this segment is also walkable, it is a doorway.
-    const probeX = fixed === 'x' ? fixedValue + outward * 0.3 : mid
-    const probeZ = fixed === 'x' ? mid : fixedValue + outward * 0.3
-    if (inside(probeX, probeZ)) continue
+// -------------------------------------------------------------- rack bays
+/**
+ * One payload-rack bay. ISS rack fronts are flat panels broken by recessed
+ * sub-panels, latch pairs, labels and the occasional vent or stowage bag,
+ * and that is what gives a module its texture at walking distance.
+ *
+ * `place(u, h, out)` maps bay-local coordinates into the world: u across the
+ * bay, h up it, out toward the viewer.
+ */
+function rackFace(b: Builder, place: (u: number, h: number, out: number) => P3, bayW: number, bayH: number, seed: number): void {
+  const P = place
+  const m = 0.05
 
-    const lowTop = 1.05
-    if (fixed === 'x') {
-      const x = fixedValue
-      // Dado band, then the upper wall: two tones give the surface a horizon.
-      if (outward > 0) {
-        b.quad(x, 0, a, x, lowTop, a, x, lowTop, c, x, 0, c, ...WALL_LOW)
-        b.quad(x, lowTop, a, x, height, a, x, height, c, x, lowTop, c, ...WALL)
-        b.quad(x, lowTop, a, x, lowTop + 0.04, a, x, lowTop + 0.04, c, x, lowTop, c, ...TRIM)
-      } else {
-        b.quad(x, 0, c, x, lowTop, c, x, lowTop, a, x, 0, a, ...WALL_LOW)
-        b.quad(x, lowTop, c, x, height, c, x, height, a, x, lowTop, a, ...WALL)
-        b.quad(x, lowTop, c, x, lowTop + 0.04, c, x, lowTop + 0.04, a, x, lowTop, a, ...TRIM)
-      }
-    } else {
-      const z = fixedValue
-      if (outward > 0) {
-        b.quad(c, 0, z, c, lowTop, z, a, lowTop, z, a, 0, z, ...WALL_LOW)
-        b.quad(c, lowTop, z, c, height, z, a, height, z, a, lowTop, z, ...WALL)
-        b.quad(c, lowTop, z, c, lowTop + 0.04, z, a, lowTop + 0.04, z, a, lowTop, z, ...TRIM)
-      } else {
-        b.quad(a, 0, z, a, lowTop, z, c, lowTop, z, c, 0, z, ...WALL_LOW)
-        b.quad(a, lowTop, z, a, height, z, c, height, z, c, lowTop, z, ...WALL)
-        b.quad(a, lowTop, z, a, lowTop + 0.04, z, c, lowTop + 0.04, z, c, lowTop, z, ...TRIM)
+  // Rack front, then a proud surround so bays read as separate units.
+  b.quad(P(m, m, 0), P(m, bayH - m, 0), P(bayW - m, bayH - m, 0), P(bayW - m, m, 0), PANEL, M_PANEL)
+  for (const [u0, h0, u1, h1] of [
+    [0, 0, bayW, m], [0, bayH - m, bayW, bayH], [0, 0, m, bayH], [bayW - m, 0, bayW, bayH],
+  ]) {
+    b.quad(P(u0, h0, 0.025), P(u0, h1, 0.025), P(u1, h1, 0.025), P(u1, h0, 0.025), ALLOY, M_METAL)
+  }
+
+  // Recessed sub-panels with latches and labels.
+  const rows = 3
+  const inner = bayH - 0.28
+  for (let i = 0; i < rows; i++) {
+    const h0 = m + 0.09 + (i * inner) / rows
+    const h1 = h0 + inner / rows - 0.08
+    const tone = rnd(seed + i) > 0.6 ? PANEL_2 : PANEL
+    b.quad(P(m + 0.08, h0, -0.03), P(m + 0.08, h1, -0.03), P(bayW - m - 0.08, h1, -0.03), P(bayW - m - 0.08, h0, -0.03), tone, M_PANEL)
+    for (const u of [m + 0.15, bayW - m - 0.15]) {
+      b.quad(P(u - 0.03, h0 + 0.035, 0.008), P(u - 0.03, h0 + 0.082, 0.008), P(u + 0.03, h0 + 0.082, 0.008), P(u + 0.03, h0 + 0.035, 0.008), ALLOY, M_METAL)
+    }
+    if (rnd(seed * 3.1 + i) > 0.42) {
+      const lw = 0.15 + rnd(seed + i * 7) * 0.22
+      b.quad(P(m + 0.24, h1 - 0.08, 0.006), P(m + 0.24, h1 - 0.032, 0.006), P(m + 0.24 + lw, h1 - 0.032, 0.006), P(m + 0.24 + lw, h1 - 0.08, 0.006), LABEL, M_SOFT)
+    }
+  }
+
+  // One feature per bay: a vent, a stowage bag, or a caution placard.
+  const kind = rnd(seed * 5.7)
+  if (kind > 0.72) {
+    const vh = 0.34
+    const vy = bayH * 0.5 - vh / 2
+    const u0 = bayW * 0.5 - 0.22
+    const u1 = bayW * 0.5 + 0.22
+    b.quad(P(u0, vy, -0.05), P(u0, vy + vh, -0.05), P(u1, vy + vh, -0.05), P(u1, vy, -0.05), GRATE, M_SOFT)
+    for (let i = 0; i < 8; i++) {
+      const yy = vy + 0.025 + (i * (vh - 0.05)) / 7
+      b.quad(P(u0, yy, -0.018), P(u0, yy + 0.013, -0.018), P(u1, yy + 0.013, -0.018), P(u1, yy, -0.018), ALLOY, M_METAL)
+    }
+  } else if (kind > 0.46) {
+    const bw = 0.44, bh = 0.32, dep = 0.19
+    const u0 = bayW * 0.5 - bw / 2
+    const h0 = bayH * 0.4
+    const face = rnd(seed) > 0.5 ? BAG : BAG_2
+    b.quad(P(u0, h0, dep), P(u0, h0 + bh, dep), P(u0 + bw, h0 + bh, dep), P(u0 + bw, h0, dep), face, M_SOFT)
+    b.quad(P(u0, h0, 0), P(u0, h0, dep), P(u0 + bw, h0, dep), P(u0 + bw, h0, 0), BAG_2, M_SOFT)
+    b.quad(P(u0, h0 + bh, dep), P(u0, h0 + bh, 0), P(u0 + bw, h0 + bh, 0), P(u0 + bw, h0 + bh, dep), BAG_2, M_SOFT)
+    b.quad(P(u0, h0, 0), P(u0, h0 + bh, 0), P(u0, h0 + bh, dep), P(u0, h0, dep), BAG_2, M_SOFT)
+    b.quad(P(u0 + bw, h0, dep), P(u0 + bw, h0 + bh, dep), P(u0 + bw, h0 + bh, 0), P(u0 + bw, h0, 0), BAG_2, M_SOFT)
+    for (const t of [0.3, 0.72]) {
+      const hh = h0 + bh * t
+      b.quad(P(u0 - 0.025, hh, dep + 0.012), P(u0 - 0.025, hh + 0.018, dep + 0.012), P(u0 + bw + 0.025, hh + 0.018, dep + 0.012), P(u0 + bw + 0.025, hh, dep + 0.012), CABLE, M_RUBBER)
+    }
+  } else if (kind > 0.33) {
+    b.quad(P(bayW - 0.32, bayH - 0.32, 0.007), P(bayW - 0.32, bayH - 0.19, 0.007), P(bayW - 0.13, bayH - 0.19, 0.007), P(bayW - 0.13, bayH - 0.32, 0.007), AMBER_L, M_SOFT)
+  }
+}
+
+// ----------------------------------------------------------- module shell
+function moduleShell(b: Builder, r: Room, along: 'x' | 'z'): void {
+  const h = r.height
+  const c = 0.42
+  const a0 = along === 'z' ? r.z0 : r.x0
+  const a1 = along === 'z' ? r.z1 : r.x1
+  const w0 = along === 'z' ? r.x0 : r.z0
+  const w1 = along === 'z' ? r.x1 : r.z1
+  const wc = (w0 + w1) / 2
+
+  const W = (t: number, u: number, y: number): P3 => (along === 'z' ? [u, y, t] : [t, y, u])
+
+  const bays = Math.max(2, Math.round((a1 - a0) / 1.08))
+  const bayLen = (a1 - a0) / bays
+
+  for (let i = 0; i < bays; i++) {
+    const t0 = a0 + i * bayLen
+    const t1 = t0 + bayLen
+    const mid = (t0 + t1) / 2
+    const seed = i * 13.7 + (along === 'z' ? 0 : 91)
+
+    const lo = W(mid, w0 - 0.4, 1)
+    const hi = W(mid, w1 + 0.4, 1)
+    const openLo = inside(lo[0], lo[2])
+    const openHi = inside(hi[0], hi[2])
+
+    // Deck: structural panels with a grated centre run and seam rails.
+    b.quad(W(t0, w0 + c, 0), W(t1, w0 + c, 0), W(t1, w1 - c, 0), W(t0, w1 - c, 0), FLOORPAN, M_FLOOR)
+    b.quad(W(t0 + 0.05, wc - 0.45, 0.014), W(t1 - 0.05, wc - 0.45, 0.014), W(t1 - 0.05, wc + 0.45, 0.014), W(t0 + 0.05, wc + 0.45, 0.014), GRATE, M_SOFT)
+    for (const u of [wc - 0.47, wc + 0.47]) {
+      const p0 = W(t0, u - 0.025, 0.014)
+      const p1 = W(t1, u + 0.025, 0.035)
+      b.box(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], ALLOY, M_METAL)
+    }
+    const s0 = W(t1 - 0.03, w0 + c, 0.014)
+    const s1 = W(t1 + 0.03, w1 - c, 0.032)
+    b.box(s0[0], s0[1], s0[2], s1[0], s1[1], s1[2], ALLOY, M_METAL)
+
+    // Deck-head: utility panel, a cable tray and bundles running the length.
+    b.quad(W(t0, w1 - c, h), W(t1, w1 - c, h), W(t1, w0 + c, h), W(t0, w0 + c, h), PANEL_2, M_PANEL)
+    const c0 = W(t0 + 0.06, wc - 0.32, h - 0.15)
+    const c1 = W(t1 - 0.06, wc + 0.32, h - 0.04)
+    b.box(c0[0], c0[1], c0[2], c1[0], c1[1], c1[2], ALLOY, M_METAL)
+    for (const off of [-0.78, -0.66, 0.7, 0.8]) {
+      const d0 = W(t0, wc + off - 0.035, h - 0.21)
+      const d1 = W(t1, wc + off + 0.035, h - 0.14)
+      b.box(d0[0], d0[1], d0[2], d1[0], d1[1], d1[2], CABLE, M_RUBBER)
+    }
+
+    // Chamfers, top and bottom, both sides.
+    for (const side of [-1, 1] as const) {
+      const wEdge = side < 0 ? w0 : w1
+      const wIn = side < 0 ? w0 + c : w1 - c
+      b.quad(W(t0, wIn, 0), W(t1, wIn, 0), W(t1, wEdge, c), W(t0, wEdge, c), ALLOY, [0.5, 0.4, 1])
+      b.quad(W(t0, wEdge, h - c), W(t1, wEdge, h - c), W(t1, wIn, h), W(t0, wIn, h), ALLOY, [0.5, 0.4, 1])
+    }
+
+    // Side walls: rack bays, except where the bay is a doorway.
+    for (const side of [-1, 1] as const) {
+      if (side < 0 ? openLo : openHi) continue
+      const wEdge = side < 0 ? w0 : w1
+      const place = (u: number, hh: number, out: number): P3 => W(t0 + u, wEdge - side * out, c + hh)
+      rackFace(b, place, bayLen, h - 2 * c, seed + (side < 0 ? 0 : 41))
+    }
+  }
+
+  // End bulkheads. A module's long ends are not covered by the bay loop, so
+  // without these you see straight out of the vessel. One is omitted wherever
+  // the end opens into another compartment, and the command module's forward
+  // end is skipped because the cupola bulkhead is built separately.
+  for (const end of [a0, a1] as const) {
+    const outward = end === a0 ? -1 : 1
+    const probe = W(end + outward * 0.4, wc, 1)
+    if (inside(probe[0], probe[2])) continue
+    if (r.id === 'command' && end === a1) continue
+
+    // Bulkhead face, then two rack panels on it so it is not a blank wall.
+    b.quad(W(end, w0 + c, 0), W(end, w1 - c, 0), W(end, w1 - c, h), W(end, w0 + c, h), PANEL_2, M_PANEL)
+    b.quad(W(end, w0, c), W(end, w0 + c, 0), W(end, w0 + c, h), W(end, w0, h - c), ALLOY, [0.5, 0.4, 1])
+    b.quad(W(end, w1 - c, 0), W(end, w1, c), W(end, w1, h - c), W(end, w1 - c, h), ALLOY, [0.5, 0.4, 1])
+
+    const panels = Math.max(1, Math.round((w1 - w0 - 2 * c) / 1.1))
+    const pw = (w1 - w0 - 2 * c) / panels
+    for (let k = 0; k < panels; k++) {
+      const u0 = w0 + c + k * pw
+      const place = (u: number, hh: number, out: number): P3 => W(end + outward * out, u0 + (outward > 0 ? u : pw - u), c + hh)
+      rackFace(b, place, pw, h - 2 * c, 211 + k * 7.3 + (end === a0 ? 0 : 53))
+    }
+  }
+
+  // Handrails down both sides, with stand-offs.
+  for (const side of [-1, 1] as const) {
+    const wEdge = (side < 0 ? w0 : w1) - side * 0.16
+    for (const y of [0.98, h - 0.78]) {
+      const r0 = W(a0 + 0.35, wEdge - 0.03, y - 0.03)
+      const r1 = W(a1 - 0.35, wEdge + 0.03, y + 0.03)
+      b.box(r0[0], r0[1], r0[2], r1[0], r1[1], r1[2], RAIL, M_RAIL)
+      for (const t of [a0 + 0.4, (a0 + a1) / 2, a1 - 0.4]) {
+        const m0 = W(t - 0.032, wEdge + side * 0.055, y - 0.032)
+        const m1 = W(t + 0.032, wEdge + side * 0.095, y + 0.032)
+        b.box(m0[0], m0[1], m0[2], m1[0], m1[1], m1[2], ALLOY, M_METAL)
       }
     }
   }
 }
 
-/** The forward wall of the command deck, built around the window aperture. */
-function bowWall(b: Builder, r: Room): void {
-  const z = r.z1
-  const { x0: wx0, x1: wx1, y0: wy0, y1: wy1 } = WINDOW
-  // Left of the aperture, right of it, under it, over it.
-  b.quad(wx0, 0, z, wx0, r.height, z, r.x0, r.height, z, r.x0, 0, z, ...WALL)
-  b.quad(r.x1, 0, z, r.x1, r.height, z, wx1, r.height, z, wx1, 0, z, ...WALL)
-  b.quad(wx1, 0, z, wx1, wy0, z, wx0, wy0, z, wx0, 0, z, ...WALL_LOW)
-  b.quad(wx1, wy1, z, wx1, r.height, z, wx0, r.height, z, wx0, wy1, z, ...WALL)
-  // A reveal around the glass so the hull reads as thick.
-  const d = 0.22
-  b.quad(wx0, wy0, z, wx0, wy1, z, wx0, wy1, z - d, wx0, wy0, z - d, ...TRIM)
-  b.quad(wx1, wy0, z - d, wx1, wy1, z - d, wx1, wy1, z, wx1, wy0, z, ...TRIM)
-  b.quad(wx0, wy1, z - d, wx0, wy1, z, wx1, wy1, z, wx1, wy1, z - d, ...TRIM)
-  b.quad(wx0, wy0, z, wx0, wy0, z - d, wx1, wy0, z - d, wx1, wy0, z, ...TRIM)
-  // Mullions: three uprights breaking the glass into panes.
-  for (let i = 1; i <= 3; i++) {
-    const mx = wx0 + ((wx1 - wx0) * i) / 4
-    b.box(mx - 0.06, wy0, z - 0.06, mx + 0.06, wy1, z + 0.02, ...TRIM)
+// ----------------------------------------------------------- hatch collar
+/** The peach structural surround where two modules meet. */
+function hatchCollar(b: Builder, axis: 'x' | 'z', at: number, across0: number, across1: number, h: number): void {
+  const cx = (across0 + across1) / 2
+  const halfW = Math.min(1.0, (across1 - across0) / 2 - 0.2)
+  const y0 = 0.1
+  const y1 = Math.min(h - 0.3, 2.2)
+  const d = 0.26
+  const W = (u: number, y: number, t: number): P3 => (axis === 'z' ? [u, y, t] : [t, y, u])
+  const b2 = 0.24
+
+  const segs: [number, number, number, number][] = [
+    [cx - halfW - b2, y0 - b2, cx - halfW, y1 + b2],
+    [cx + halfW, y0 - b2, cx + halfW + b2, y1 + b2],
+    [cx - halfW, y1, cx + halfW, y1 + b2],
+    [cx - halfW, y0 - b2, cx + halfW, y0],
+  ]
+  for (const [u0, v0, u1, v1] of segs) {
+    b.quad(W(u0, v0, at - d), W(u0, v1, at - d), W(u1, v1, at - d), W(u1, v0, at - d), PEACH, M_PANEL)
+    b.quad(W(u0, v0, at + d), W(u1, v0, at + d), W(u1, v1, at + d), W(u0, v1, at + d), PEACH, M_PANEL)
+    // Outer edge of the collar
+    b.quad(W(u0, v0, at - d), W(u0, v0, at + d), W(u1, v0, at + d), W(u1, v0, at - d), PEACH_DK, M_PANEL)
+  }
+
+  // Throat: the inside faces of the opening.
+  for (const u of [cx - halfW, cx + halfW]) {
+    b.quad(W(u, y0, at - d), W(u, y1, at - d), W(u, y1, at + d), W(u, y0, at + d), PEACH_DK, M_PANEL)
+  }
+  b.quad(W(cx - halfW, y1, at - d), W(cx - halfW, y1, at + d), W(cx + halfW, y1, at + d), W(cx + halfW, y1, at - d), PEACH_DK, M_PANEL)
+
+  // Bolt heads around the collar: the detail that sells a pressure fitting.
+  const n = 18
+  for (let i = 0; i < n; i++) {
+    const ang = (i / n) * Math.PI * 2
+    const u = cx + Math.cos(ang) * (halfW + b2 * 0.5)
+    const y = (y0 + y1) / 2 + Math.sin(ang) * ((y1 - y0) / 2 + b2 * 0.5)
+    for (const o of [at - d - 0.014, at + d + 0.014]) {
+      const q0 = W(u - 0.03, y - 0.03, o - 0.014)
+      const q1 = W(u + 0.03, y + 0.03, o + 0.014)
+      b.box(q0[0], q0[1], q0[2], q1[0], q1[1], q1[2], ALLOY, M_METAL)
+    }
   }
 }
 
-/** Structural ribs at intervals along a compartment, for depth. */
-function ribs(b: Builder, r: Room): void {
-  const span = r.z1 - r.z0
-  const n = Math.max(1, Math.round(span / 3.2))
-  for (let i = 1; i < n; i++) {
-    const z = r.z0 + (span * i) / n
-    b.box(r.x0, r.height - 0.26, z - 0.09, r.x1, r.height - 0.02, z + 0.09, ...RIB)
-    b.box(r.x0 + 0.02, 1.05, z - 0.07, r.x0 + 0.14, r.height - 0.26, z + 0.07, ...RIB)
-    b.box(r.x1 - 0.14, 1.05, z - 0.07, r.x1 - 0.02, r.height - 0.26, z + 0.07, ...RIB)
+// ---------------------------------------------------------------- cupola
+/**
+ * The observation structure: one circular pane ringed by six trapezoidal
+ * ones, after the ISS cupola. Only the structure is built — the panes are left
+ * open so the sky pass shows through, which is what makes the Earth outside a
+ * real exterior rather than a picture hung on a wall.
+ */
+function cupola(b: Builder): void {
+  const { x: cx, y: cy, z: cz, radius: R, depth: D } = CUPOLA
+  const rIn = R * 0.40
+  const rMid = R * 0.55
+
+  const p = (r: number, a: number, z: number): P3 => [cx + Math.cos(a) * r, cy + Math.sin(a) * r, z]
+
+  // Ring between the centre pane and the six around it.
+  const seg = 30
+  for (let i = 0; i < seg; i++) {
+    const a0 = (i / seg) * Math.PI * 2
+    const a1 = ((i + 1) / seg) * Math.PI * 2
+    b.quad(p(rIn, a0, cz), p(rMid, a0, cz), p(rMid, a1, cz), p(rIn, a1, cz), DARKMETAL, M_FRAME)
+    // Reveal, so the glass reads as thick
+    b.quad(p(rIn, a0, cz), p(rIn, a1, cz), p(rIn, a1, cz + D), p(rIn, a0, cz + D), DARKMETAL, M_FRAME)
+    b.quad(p(rMid, a0, cz + D * 0.8), p(rMid, a1, cz + D * 0.8), p(rMid, a1, cz), p(rMid, a0, cz), DARKMETAL, M_FRAME)
+  }
+  // Bolts around the centre pane
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2
+    const q = p((rIn + rMid) / 2, a, cz - 0.016)
+    b.box(q[0] - 0.028, q[1] - 0.028, q[2] - 0.014, q[0] + 0.028, q[1] + 0.028, q[2] + 0.014, ALLOY, M_METAL)
+  }
+
+  // Six mullions and the outer rim.
+  const gap = 0.07
+  for (let k = 0; k < 6; k++) {
+    const c1 = ((k + 1) / 6) * Math.PI * 2 + Math.PI / 6
+    const a0 = (k / 6) * Math.PI * 2 + Math.PI / 6 + gap
+    const a1 = c1 - gap
+    b.quad(p(rMid, c1 - gap, cz), p(R, c1 - gap, cz), p(R, c1 + gap, cz), p(rMid, c1 + gap, cz), DARKMETAL, M_FRAME)
+    b.quad(p(rMid, c1 - gap, cz), p(rMid, c1 + gap, cz), p(rMid, c1 + gap, cz + D * 0.75), p(rMid, c1 - gap, cz + D * 0.75), DARKMETAL, M_FRAME)
+
+    const steps = 6
+    for (let i = 0; i < steps; i++) {
+      const b0 = a0 + ((a1 - a0) * i) / steps
+      const b1 = a0 + ((a1 - a0) * (i + 1)) / steps
+      b.quad(p(R, b0, cz), p(R + 0.24, b0, cz), p(R + 0.24, b1, cz), p(R, b1, cz), DARKMETAL, M_FRAME)
+      b.quad(p(R, b0, cz), p(R, b1, cz), p(R, b1, cz + D * 0.75), p(R, b0, cz + D * 0.75), DARKMETAL, M_FRAME)
+      const q = p(R + 0.12, (b0 + b1) / 2, cz - 0.016)
+      b.box(q[0] - 0.028, q[1] - 0.028, q[2] - 0.014, q[0] + 0.028, q[1] + 0.028, q[2] + 0.014, ALLOY, M_METAL)
+    }
+  }
+
+  // Shutter housings stowed around the outside, and approach handrails.
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2 + Math.PI / 3
+    const ux = cx + Math.cos(a) * (R + 0.4)
+    const uy = cy + Math.sin(a) * (R + 0.4)
+    b.box(ux - 0.22, uy - 0.1, cz - 0.34, ux + 0.22, uy + 0.1, cz - 0.08, ALLOY, M_METAL)
+  }
+  for (const sx of [-1, 1]) {
+    b.box(cx + sx * (R + 0.52) - 0.035, cy - 0.95, cz - 0.5, cx + sx * (R + 0.52) + 0.035, cy + 0.95, cz - 0.43, RAIL, M_RAIL)
   }
 }
 
-/** A console body: a canted desk with a housing. The screen is emissive. */
-function consoleBody(b: Builder, x: number, z: number, facing: number, width: number): void {
+// ------------------------------------------------------------ workstation
+/** A console as ISS hardware: a rack panel, a work surface, a screen on an arm. */
+function workstation(b: Builder, x: number, z: number, facing: number, width: number): void {
   const c = Math.cos(facing)
   const s = Math.sin(facing)
-  // Local -> world. Local +x is the console's width, local +z is away from the user.
-  const P = (lx: number, ly: number, lz: number): [number, number, number] => [x + lx * c + lz * s, ly, z - lx * s + lz * c]
+  const P = (lx: number, ly: number, lz: number): P3 => [x + lx * c + lz * s, ly, z - lx * s + lz * c]
   const hw = width / 2
-  const put = (
-    p0: [number, number, number], p1: [number, number, number], p2: [number, number, number], p3: [number, number, number],
-    col: readonly [number, number, number],
-  ) => b.quad(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2], col[0], col[1], col[2])
 
-  // Plinth
-  put(P(-hw, 0, 0.0), P(-hw, 0.78, 0.0), P(hw, 0.78, 0.0), P(hw, 0, 0.0), CONSOLE)
-  put(P(-hw, 0.78, 0.0), P(-hw, 0.78, 0.5), P(hw, 0.78, 0.5), P(hw, 0.78, 0.0), CONSOLE)
-  put(P(-hw, 0, 0.5), P(-hw, 0.78, 0.5), P(-hw, 0.78, 0.0), P(-hw, 0, 0.0), CONSOLE)
-  put(P(hw, 0, 0.0), P(hw, 0.78, 0.0), P(hw, 0.78, 0.5), P(hw, 0, 0.5), CONSOLE)
-  // Canted screen housing rising behind the desk
-  put(P(-hw, 0.78, 0.5), P(-hw, 1.92, 0.78), P(hw, 1.92, 0.78), P(hw, 0.78, 0.5), CONSOLE)
-  put(P(-hw, 1.92, 0.78), P(-hw, 1.98, 0.9), P(hw, 1.98, 0.9), P(hw, 1.92, 0.78), TRIM)
-  // Side cheeks
-  put(P(-hw, 0.78, 0.5), P(-hw, 0.78, 0.9), P(-hw, 1.98, 0.9), P(-hw, 1.92, 0.78), CONSOLE)
-  put(P(hw, 1.92, 0.78), P(hw, 1.98, 0.9), P(hw, 0.78, 0.9), P(hw, 0.78, 0.5), CONSOLE)
+  // Work surface, edge and legs
+  b.quad(P(-hw, 0.76, 0.0), P(-hw, 0.76, 0.56), P(hw, 0.76, 0.56), P(hw, 0.76, 0.0), ALLOY, [0.42, 0.7, 1])
+  b.quad(P(-hw, 0.73, 0.0), P(hw, 0.73, 0.0), P(hw, 0.76, 0.0), P(-hw, 0.76, 0.0), ALLOY, M_METAL)
+  for (const u of [-hw + 0.14, hw - 0.14]) {
+    b.box(...boxPts(P(u - 0.04, 0.0, 0.12), P(u + 0.04, 0.76, 0.2)), ALLOY, M_METAL)
+  }
+  // Foot restraint on the deck in front of it
+  b.quad(P(-0.28, 0.018, -0.46), P(-0.28, 0.018, -0.06), P(0.28, 0.018, -0.06), P(0.28, 0.018, -0.46), GRATE, M_SOFT)
+  for (const u of [-0.2, 0.2]) {
+    b.box(...boxPts(P(u - 0.03, 0.018, -0.4), P(u + 0.03, 0.07, -0.12)), ALLOY, M_METAL)
+  }
+
+  // Equipment stack behind, flush with the rack line
+  b.quad(P(-hw, 0.76, 0.54), P(-hw, 1.98, 0.54), P(hw, 1.98, 0.54), P(hw, 0.76, 0.54), PANEL, M_PANEL)
+  for (let i = 0; i < 3; i++) {
+    const y0 = 0.88 + i * 0.36
+    b.quad(P(-hw + 0.09, y0, 0.51), P(-hw + 0.09, y0 + 0.26, 0.51), P(hw - 0.09, y0 + 0.26, 0.51), P(hw - 0.09, y0, 0.51), i === 1 ? PANEL_2 : PANEL, M_PANEL)
+    for (const u of [-hw + 0.17, hw - 0.17]) {
+      b.quad(P(u - 0.03, y0 + 0.04, 0.545), P(u - 0.03, y0 + 0.09, 0.545), P(u + 0.03, y0 + 0.09, 0.545), P(u + 0.03, y0 + 0.04, 0.545), ALLOY, M_METAL)
+    }
+  }
+  // Arm and display bezel; the lit face comes from buildEmissive.
+  b.box(...boxPts(P(-0.05, 1.1, 0.26), P(0.05, 1.18, 0.5)), ALLOY, M_METAL)
+  b.quad(P(-0.46, 0.98, 0.2), P(-0.46, 1.62, 0.33), P(0.46, 1.62, 0.33), P(0.46, 0.98, 0.2), DARKMETAL, [0.38, 0.5, 1])
+  // Cables dropping from the display into the stack
+  b.box(...boxPts(P(0.1, 0.78, 0.44), P(0.14, 1.0, 0.48)), CABLE, M_RUBBER)
 }
 
-/** The lit parts: screens and strip lighting. Drawn unlit and additively. */
+function boxPts(a: P3, b: P3): [number, number, number, number, number, number] {
+  return [a[0], a[1], a[2], b[0], b[1], b[2]]
+}
+
+/** The lit surfaces: console screens and deck-head light boxes. */
 export function buildEmissive(): MeshData {
   const b = new Builder()
   for (const s of STATIONS) {
     const c = Math.cos(s.facing)
     const sn = Math.sin(s.facing)
-    const P = (lx: number, ly: number, lz: number): [number, number, number] => [s.x + lx * c + lz * sn, ly, s.z - lx * sn + lz * c]
-    const hw = s.width / 2 - 0.12
-    // The screen face, inset slightly into the housing.
-    const p0 = P(-hw, 0.9, 0.47)
-    const p1 = P(-hw, 1.86, 0.715)
-    const p2 = P(hw, 1.86, 0.715)
-    const p3 = P(hw, 0.9, 0.47)
-    b.quad(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2], 0.038, 0.1, 0.138)
-    // Desk glow strip
-    const q0 = P(-hw, 0.79, 0.12)
-    const q1 = P(-hw, 0.79, 0.4)
-    const q2 = P(hw, 0.79, 0.4)
-    const q3 = P(hw, 0.79, 0.12)
-    b.quad(q0[0], q0[1], q0[2], q1[0], q1[1], q1[2], q2[0], q2[1], q2[2], q3[0], q3[1], q3[2], 0.042, 0.11, 0.15)
+    const P = (lx: number, ly: number, lz: number): P3 => [s.x + lx * c + lz * sn, ly, s.z - lx * sn + lz * c]
+    b.quad(P(-0.42, 1.01, 0.188), P(-0.42, 1.59, 0.307), P(0.42, 1.59, 0.307), P(0.42, 1.01, 0.188), [0.12, 0.28, 0.38], [1, 0, 1])
   }
-  // Deck-head light runs down the spine and across the command deck.
   for (const r of ROOMS) {
-    const y = r.height - 0.05
-    const cx = (r.x0 + r.x1) / 2
-    b.quad(cx - 0.26, y, r.z0 + 0.4, cx - 0.26, y, r.z1 - 0.4, cx + 0.26, y, r.z1 - 0.4, cx + 0.26, y, r.z0 + 0.4, 0.2, 0.225, 0.265)
+    const along = axisOf(r)
+    const a0 = along === 'z' ? r.z0 : r.x0
+    const a1 = along === 'z' ? r.z1 : r.x1
+    const cu = along === 'z' ? (r.x0 + r.x1) / 2 : (r.z0 + r.z1) / 2
+    const n = Math.max(2, Math.round((a1 - a0) / 2.2))
+    const y = r.height - 0.155
+    for (let i = 0; i < n; i++) {
+      const t0 = a0 + ((a1 - a0) * (i + 0.16)) / n
+      const t1 = a0 + ((a1 - a0) * (i + 0.84)) / n
+      const W = (t: number, u: number): P3 => (along === 'z' ? [u, y, t] : [t, y, u])
+      b.quad(W(t0, cu - 0.27), W(t1, cu - 0.27), W(t1, cu + 0.27), W(t0, cu + 0.27), [0.95, 0.93, 0.87], [1, 0, 1])
+    }
   }
-  // Floor guidance stripe along the spine, amber at the junctions.
-  b.quad(-0.18, 0.012, -15.4, -0.18, 0.012, 14.4, 0.18, 0.012, 14.4, 0.18, 0.012, -15.4, 0.1, 0.11, 0.13)
   return b.data()
 }
 
-/** Everything that is lit by the room. */
+// -------------------------------------------------------------- assembly
 export function buildStructure(): MeshData {
   const b = new Builder()
-  for (const r of ROOMS) {
-    // Deck and deck-head
-    b.quad(r.x0, 0, r.z0, r.x0, 0, r.z1, r.x1, 0, r.z1, r.x1, 0, r.z0, ...DECK)
-    b.quad(r.x0, r.height, r.z1, r.x0, r.height, r.z0, r.x1, r.height, r.z0, r.x1, r.height, r.z1, ...WALL_LOW)
-    // Perimeter, minus doorways
-    const isBow = r.id === 'command'
-    wallRun(b, 'x', r.x0, r.z0, r.z1, r.height, -1)
-    wallRun(b, 'x', r.x1, r.z0, r.z1, r.height, 1)
-    wallRun(b, 'z', r.z0, r.x0, r.x1, r.height, -1)
-    if (isBow) bowWall(b, r)
-    else wallRun(b, 'z', r.z1, r.x0, r.x1, r.height, 1)
-    ribs(b, r)
+  for (const r of ROOMS) moduleShell(b, r, axisOf(r))
+
+  const spine = ROOMS[0]
+  const cmd = ROOMS[1]
+  hatchCollar(b, 'z', spine.z0, spine.x0, spine.x1, spine.height)
+  hatchCollar(b, 'z', spine.z1, spine.x0, spine.x1, spine.height)
+  for (const r of ROOMS.slice(2)) {
+    const at = Math.abs(r.x0 - spine.x1) < 0.01 ? spine.x1 : spine.x0
+    hatchCollar(b, 'x', at, r.z0, r.z1, r.height)
   }
-  for (const s of STATIONS) consoleBody(b, s.x, s.z, s.facing, s.width)
-  return b.data()
+
+  // Forward bulkhead of the command module, with the cupola aperture left open.
+  const z = cmd.z1
+  const { x: ccx, y: ccy, radius: R } = CUPOLA
+  const seg = 28
+  for (let i = 0; i < seg; i++) {
+    const a0 = (i / seg) * Math.PI * 2
+    const a1 = ((i + 1) / seg) * Math.PI * 2
+    const o = R + 0.24
+    const clampX = (v: number) => Math.max(cmd.x0, Math.min(cmd.x1, v))
+    const clampY = (v: number) => Math.max(0, Math.min(cmd.height, v))
+    b.quad(
+      [ccx + Math.cos(a0) * o, ccy + Math.sin(a0) * o, z],
+      [clampX(ccx + Math.cos(a0) * 16), clampY(ccy + Math.sin(a0) * 16), z],
+      [clampX(ccx + Math.cos(a1) * 16), clampY(ccy + Math.sin(a1) * 16), z],
+      [ccx + Math.cos(a1) * o, ccy + Math.sin(a1) * o, z],
+      PANEL, M_PANEL,
+    )
+  }
+  cupola(b)
+
+  for (const s of STATIONS) workstation(b, s.x, s.z, s.facing, s.width)
+
+  const mesh = b.data()
+  bakeAmbientOcclusion(mesh)
+  return mesh
+}
+
+/**
+ * Per-vertex ambient occlusion, sampled against the deck plan.
+ *
+ * For each vertex a short fan of rays is fired into the hemisphere about its
+ * normal, and each is asked whether it is still in open space a little way
+ * out. A vertex in the middle of a rack face sees open volume and stays
+ * bright; one tucked into a corner, inside a hatch throat or under a work
+ * surface sees structure and darkens. It runs once at startup, costs nothing
+ * per frame, and is most of what makes the interior read as lit by a real room
+ * rather than by a lamp in a void.
+ */
+function bakeAmbientOcclusion(mesh: MeshData): void {
+  const v = mesh.vertices
+  const stride = FLOATS_PER_VERTEX
+  const RAYS = 8
+  const dirs: P3[] = []
+  for (let i = 0; i < RAYS; i++) {
+    const t = (i + 0.5) / RAYS
+    const phi = Math.acos(1 - t * 0.92)
+    const theta = Math.PI * (1 + Math.sqrt(5)) * i
+    dirs.push([Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)])
+  }
+  const DIST = [0.2, 0.55, 1.2]
+
+  for (let o = 0; o < v.length; o += stride) {
+    const px = v[o], py = v[o + 1], pz = v[o + 2]
+    const nx = v[o + 3], ny = v[o + 4], nz = v[o + 5]
+    const up: P3 = Math.abs(ny) > 0.9 ? [1, 0, 0] : [0, 1, 0]
+    let tx = up[1] * nz - up[2] * ny
+    let ty = up[2] * nx - up[0] * nz
+    let tz = up[0] * ny - up[1] * nx
+    const tl = Math.hypot(tx, ty, tz) || 1
+    tx /= tl; ty /= tl; tz /= tl
+    const bx = ny * tz - nz * ty
+    const by = nz * tx - nx * tz
+    const bz = nx * ty - ny * tx
+
+    let open = 0
+    let total = 0
+    for (const [dx, dy, dz] of dirs) {
+      const wx = tx * dx + nx * dy + bx * dz
+      const wy = ty * dx + ny * dy + by * dz
+      const wz = tz * dx + nz * dy + bz * dz
+      for (const d of DIST) {
+        total++
+        const sx = px + wx * d + nx * 0.02
+        const sy = py + wy * d + ny * 0.02
+        const sz = pz + wz * d + nz * 0.02
+        if (sy > 0.03 && sy < 3.2 && inside(sx, sz)) open++
+      }
+    }
+    v[o + 11] *= 0.3 + 0.7 * Math.pow(total ? open / total : 1, 0.8)
+  }
 }

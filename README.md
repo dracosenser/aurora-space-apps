@@ -40,7 +40,7 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 | Section | Purpose |
 |---|---|
 | **Self-Assessment** | The crew member's own station. Eight readings taken and entered by hand, each with how to take it, why it matters in spaceflight, a reference band drawn to scale and a written action for the band it lands in. A clickable human figure opens five body systems. Duty-period countdown, readiness instrument, protocols and mission patches |
-| **Flight Deck** | The vessel itself, in first person. Walk a spine corridor, four alcoves and a command deck with the destination in the bow window. Five live consoles: navigation, medical, crew quarters, environmental control and communications. WebGL2, no engine, no model files, no new dependencies |
+| **Flight Deck** | An orbital research station, in first person. Five pressurised modules off a central spine, built to ISS US-segment proportions — rack bays, peach hatch collars, handrails, gridded deck panels — and a seven-pane cupola looking down at Earth. Five live consoles. WebGL2, no engine, no model files, no new dependencies |
 | **Signal Veil** | The signature instrument, now a page of the application rather than a separate demo. A fogged EVA visor you wipe clear to reveal one crew member's health signals as a constellation, driven by the Constellation Engine. Inspect a signal, draw a connection, scrub the mission timeline, replay how a pattern developed, record a response. Runs on the app's own crew records, with a crew switcher |
 | **Mission Control** | Mission elapsed time, phase, crew size, crew composite status, individual astronaut cards with sparklines, 90-day crew trend chart, recent alerts, interactive mission timeline, event log, optional live NASA space-weather feed |
 | **Crew Health Analytics** | Five categories (cardiovascular, sleep, physical, radiation, behavioral), 15 indicators, date-range presets and custom ranges, individual vs crew comparison, alert windows and mission events drawn on charts, 7-day smoothing, historical trend table |
@@ -57,6 +57,32 @@ Extra features: historical mission playback (top-bar slider recomputes every ale
 Built on raw WebGL2 rather than a 3D engine, because the project already
 hand-writes its shaders and adding Three.js for one page would roughly double
 the dependency weight for no capability this needed.
+
+**The architecture is the ISS US segment**, because that is what a real research
+module looks like: a chamfered-octagon cross-section about 4.6 m across, payload
+rack bays filling the side walls with recessed sub-panels, latch pairs, labels,
+vents and strapped stowage bags, peach structural collars with bolt rings at
+every hatch, blue handrails down both sides of every module, and gridded deck
+panels over a grated centre run. The layout is invented and no NASA marking
+appears anywhere aboard.
+
+**Lighting.** There is no ray tracing — WebGL2 has no ray-tracing pipeline, and
+nothing in a browser today will trace this interior at sixty frames a second.
+What produces the look instead is a microfacet BRDF (GGX, Smith, Schlick) with
+real roughness and metalness per vertex, a 1024² shadow map so sunlight through
+the cupola throws the window pattern across the deck, ambient occlusion baked
+per vertex at startup by sampling the hemisphere against the deck plan, a
+hemispheric ambient term standing in for bounce off the white rack faces, a
+separate wash from the planet through the cupola, and an ACES filmic curve.
+
+**The cupola and the planet.** One circular pane ringed by six trapezoidal ones,
+with bolted frames and thick reveals. The panes are left open as geometry, so
+what shows through is the sky pass rather than a picture on a wall. The planet
+is the one thing genuinely ray traced: an analytic ray-sphere intersection per
+pixel, with seven octaves of terrain, a separately drifting cloud deck, ocean
+glint, city lights on the night side, polar ice and an atmospheric limb. The sun
+sits high to port rather than beyond the cupola — a sun placed behind the planet
+would leave the whole disc dark, which is exactly what the first attempt did.
 
 **One source of truth for the space.** `model/deck.ts` holds the compartments as
 rectangles. The renderer builds walls from them and the player collides against
@@ -227,8 +253,9 @@ src/
   engine/       Constellation Engine: baselines, deviation, patterns, relationships,
                 joint statistics, timeline, response. No React, no DOM, 136 tests
   features/
-    flight-deck/  The vessel: model (deck plan, collision, pure and tested),
-                  render (procedural geometry, GLSL sky and interior), ui (consoles)
+    flight-deck/  The station: model (deck plan, collision, pure and tested),
+                  render (procedural ISS-style geometry, AO bake, PBR + shadow
+                  map, ray-traced planet), ui (consoles)
     signal-veil/  The visor: model (pure, tested), render (Canvas 2D + WebGL2
                   fog shader), ui (panels, charts, timeline, data table)
   lib/          Pure logic: stats, anomaly rules, health scoring, simulator, assistant, report

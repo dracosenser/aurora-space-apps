@@ -269,7 +269,7 @@ export function FlightDeck() {
         <div className="border-b border-border px-4 py-2.5">
           <p className="eyebrow-sm">Deck plan</p>
           <p className="mt-1 text-[12.5px] text-muted">
-            This browser has no WebGL2, so the vessel cannot be drawn. Every station is still
+            This browser has no WebGL2, so the station cannot be drawn. Every console is still
             available here, with the same instruments.
           </p>
         </div>
@@ -307,8 +307,8 @@ export function FlightDeck() {
             onClick={() => canvasRef.current?.requestPointerLock?.()}
             className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 text-center backdrop-blur-[2px]"
           >
-            <p className="mono text-[10.5px] uppercase tracking-[0.22em] text-cyan-200/70">AURORA · Research vessel</p>
-            <p className="display mt-2 text-[clamp(1.6rem,3.4vw,2.6rem)] text-white">Step onto the deck</p>
+            <p className="mono text-[10.5px] uppercase tracking-[0.22em] text-cyan-200/70">AURORA · Orbital research station</p>
+            <p className="display mt-2 text-[clamp(1.6rem,3.4vw,2.6rem)] text-white">Step aboard</p>
             <p className="mt-2 max-w-md text-[12.5px] leading-relaxed text-white/55">
               Click to take the controls. <span className="mono">W A S D</span> to walk,
               <span className="mono"> Shift</span> to move quickly, mouse to look,
@@ -355,7 +355,7 @@ export function FlightDeck() {
               {s.label}
             </button>
           ))}
-          <span className="annotate ml-auto shrink-0">{ROOMS.length} COMPARTMENTS · {STATIONS.length} BAYS</span>
+          <span className="annotate ml-auto shrink-0">{ROOMS.length} MODULES · {STATIONS.length} CONSOLES</span>
         </div>
       )}
 

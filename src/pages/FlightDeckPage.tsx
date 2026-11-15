@@ -17,7 +17,7 @@ export function FlightDeckPage() {
         eyebrow="Operations · 04"
         plate="PLATE FD"
         title="Flight Deck"
-        description="Walk the research vessel. Five consoles are live: navigation, the medical bay, crew quarters, environmental control and communications. Each one is an interface to the mission you are already looking at — select a crew member here and the rest of AURORA follows."
+        description="Walk the station. Five pressurised modules off a central spine, built to the proportions of the ISS US segment: payload-rack bays, peach hatch collars, handrails and gridded deck panels. Forward is a seven-pane cupola looking down at Earth. Five consoles are live, and each is an interface to the mission you are already looking at — select a crew member here and the rest of AURORA follows."
       />
 
       <FlightDeck />
@@ -35,11 +35,14 @@ export function FlightDeckPage() {
         </div>
 
         <Disclaimer className="mt-5">
-          The vessel is an interface, not a simulation of a spacecraft. AURORA models no
-          trajectory and no life support, so the deck shows no distance travelled and the
-          cabin figures are fixed nominal values rather than a simulated atmosphere. The
-          mission scenario controls at environmental control are the real model, and changing
-          them changes what the rest of the application computes. All crew data is synthetic.
+          The station is an interface, not a simulation of a spacecraft, and it is not a model
+          of the ISS. Its architecture follows the ISS US segment because that is what a real
+          research module looks like, but the layout is invented and no NASA marking appears
+          anywhere aboard. AURORA models no trajectory and no life support, so there is no
+          distance travelled and the cabin figures are fixed nominal values rather than a
+          simulated atmosphere. The mission scenario controls at environmental control are the
+          real model, and changing them changes what the rest of the application computes. All
+          crew data is synthetic.
         </Disclaimer>
       </div>
     </div>
