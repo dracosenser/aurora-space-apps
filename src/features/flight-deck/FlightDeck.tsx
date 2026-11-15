@@ -64,6 +64,15 @@ export function FlightDeck() {
   const [frameMs, setFrameMs] = useState(16)
   const [done, setDone] = useState<TaskId[]>([])
   const [showObjectives, setShowObjectives] = useState(true)
+  /**
+   * Whether anyone has taken the controls yet. The full entry plate is for the
+   * first time only; after that, losing the pointer is an ordinary thing that
+   * happens whenever a console is opened or Escape is pressed, and throwing the
+   * whole entry screen up again each time is what made it keep reappearing.
+   */
+  const [entered, setEntered] = useState(false)
+  /** True while the camera is flying to or from a console screen. */
+  const [flying, setFlying] = useState(false)
 
   const openRef = useRef<StationId | null>(null)
   openRef.current = open
@@ -78,6 +87,7 @@ export function FlightDeck() {
   autoRef.current = autoQuality
   const rendererRef = useRef<DeckRenderer | null>(null)
   const resizeRef = useRef<(() => void) | null>(null)
+  const resetGovRef = useRef<(() => void) | null>(null)
   const openStationRef = useRef<((id: StationId) => void) | null>(null)
 
   useEffect(() => {
@@ -124,7 +134,12 @@ export function FlightDeck() {
     const onChange = () => {
       setFull(document.fullscreenElement === wrapRef.current)
       // The element's box changes on the next frame, so let the observer see it.
-      requestAnimationFrame(() => resizeRef.current?.())
+      requestAnimationFrame(() => {
+        resizeRef.current?.()
+        // The frame just changed size by a large factor; the running average
+        // from the old size says nothing about the new one.
+        resetGovRef.current?.()
+      })
     }
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)
@@ -161,6 +176,7 @@ export function FlightDeck() {
     let clock = 0
     const keys = new Set<string>()
     const gov = new QualityGovernor()
+    resetGovRef.current = () => gov.reset()
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
 
     const resize = () => {
@@ -193,6 +209,10 @@ export function FlightDeck() {
       if (zoomRef.current) return
       savedPoseRef.current = pose()
       zoomRef.current = { phase: 'in', t: 0, from: pose(), to: screenPose(STATION_BY_ID[id]), station: id }
+      setFlying(true)
+      // The pointer is released so the console can be read and clicked. That
+      // is not the crew member leaving the station, so it must not bring the
+      // entry screen back.
       document.exitPointerLock?.()
     }
     openStationRef.current = beginZoom
@@ -220,7 +240,11 @@ export function FlightDeck() {
       pitch = Math.max(-1.25, Math.min(1.25, pitch - e.movementY * LOOK))
       travelRef.current = null
     }
-    const onLockChange = () => setLocked(document.pointerLockElement === canvas)
+    const onLockChange = () => {
+      const on = document.pointerLockElement === canvas
+      setLocked(on)
+      if (on) setEntered(true)
+    }
 
     const onCanvasClick = () => {
       if (openRef.current || zoomRef.current) return
@@ -286,6 +310,7 @@ export function FlightDeck() {
         if (zoom.t >= 1) {
           if (zoom.phase === 'in') setOpen(zoom.station)
           zoomRef.current = null
+          setFlying(false)
         }
       } else if (!openRef.current) {
         const travel = travelRef.current
@@ -359,6 +384,7 @@ export function FlightDeck() {
       renderer.dispose()
       rendererRef.current = null
       resizeRef.current = null
+      resetGovRef.current = null
       openStationRef.current = null
     }
   }, [toggleFullscreen])
@@ -370,6 +396,7 @@ export function FlightDeck() {
     const back = savedPoseRef.current
     if (back && id) {
       zoomRef.current = { phase: 'out', t: 0, from: screenPose(STATION_BY_ID[id]), to: back, station: id }
+      setFlying(true)
     }
   }, [])
 
@@ -526,7 +553,8 @@ export function FlightDeck() {
           </div>
         )}
 
-        {!locked && !open && !touch && (
+        {/* The entry plate, once. After that the station stays where it was. */}
+        {!entered && !locked && !open && !flying && !touch && (
           <button
             onClick={() => canvasRef.current?.requestPointerLock?.()}
             className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 text-center backdrop-blur-[2px]"
@@ -539,6 +567,16 @@ export function FlightDeck() {
               <span className="mono"> E</span> at a console, <span className="mono">F</span> for fullscreen.
               <span className="mono"> Esc</span> releases the pointer.
             </p>
+          </button>
+        )}
+
+        {/* Afterwards: a quiet prompt that does not cover the station. */}
+        {entered && !locked && !open && !flying && !touch && (
+          <button
+            onClick={() => canvasRef.current?.requestPointerLock?.()}
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 border border-white/15 bg-black/60 px-3 py-1.5 backdrop-blur-sm transition-colors hover:border-white/35"
+          >
+            <span className="mono text-[10px] uppercase tracking-[0.18em] text-white/60">Click to take the controls again</span>
           </button>
         )}
 

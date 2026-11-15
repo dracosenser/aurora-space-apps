@@ -153,12 +153,21 @@ export class QualityGovernor {
   private settled = 0
 
   /** Frames to wait after a change before trusting the average again. */
-  private static readonly SETTLE = 45
+  private static readonly SETTLE = 24
   private static readonly SLOW_MS = 26
   private static readonly FAST_MS = 11
-  private static readonly SLOW_RUN = 40
+  // Asymmetric on purpose. Dropping a preset is a rescue and should happen
+  // within a fraction of a second, which matters most on entering fullscreen,
+  // where the pixel count can jump eightfold in one frame. Climbing back is a
+  // luxury and waits for a long, settled run so the picture does not pulse.
+  private static readonly SLOW_RUN = 14
   private static readonly FAST_RUN = 260
 
+  /**
+   * Forget the running average. Called when the frame size changes under the
+   * governor's feet — entering or leaving fullscreen — so it judges the new
+   * size on its own merits instead of carrying the old one's average.
+   */
   reset(): void {
     this.avg = 16
     this.fastRun = 0

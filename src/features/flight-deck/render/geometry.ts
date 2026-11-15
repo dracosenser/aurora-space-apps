@@ -55,14 +55,43 @@ const M_RUBBER: Mat = [0.95, 0.0, 1]
 const M_FLOOR: Mat = [0.55, 0.25, 1]
 
 class Builder {
-  readonly v: number[] = []
+  /**
+   * A growable Float32Array rather than a number[]. The interior now emits
+   * around 2.7 million floats, and pushing those as boxed numbers and copying
+   * them out again was most of the time spent building the vessel on mount.
+   */
+  private buf = new Float32Array(1 << 18)
+  private n = 0
+
+  private need(floats: number): void {
+    if (this.n + floats <= this.buf.length) return
+    let cap = this.buf.length
+    while (cap < this.n + floats) cap *= 2
+    const next = new Float32Array(cap)
+    next.set(this.buf.subarray(0, this.n))
+    this.buf = next
+  }
+
+  private push12(
+    px: number, py: number, pz: number, nx: number, ny: number, nz: number,
+    r: number, g: number, bl: number, ro: number, me: number, ao: number,
+  ): void {
+    this.need(12)
+    const b = this.buf
+    let i = this.n
+    b[i++] = px; b[i++] = py; b[i++] = pz
+    b[i++] = nx; b[i++] = ny; b[i++] = nz
+    b[i++] = r; b[i++] = g; b[i++] = bl
+    b[i++] = ro; b[i++] = me; b[i++] = ao
+    this.n = i
+  }
 
   get count(): number {
-    return this.v.length / FLOATS_PER_VERTEX
+    return this.n / FLOATS_PER_VERTEX
   }
 
   data(): MeshData {
-    return { vertices: new Float32Array(this.v), count: this.count }
+    return { vertices: this.buf.subarray(0, this.n), count: this.count }
   }
 
   tri(a: P3, b: P3, c: P3, col: Rgb, mat: Mat): void {
@@ -75,7 +104,9 @@ class Builder {
     nx /= len; ny /= len; nz /= len
     const [r, g, bl] = col
     const [ro, me, ao] = mat
-    for (const p of [a, b, c]) this.v.push(p[0], p[1], p[2], nx, ny, nz, r, g, bl, ro, me, ao)
+    this.push12(a[0], a[1], a[2], nx, ny, nz, r, g, bl, ro, me, ao)
+    this.push12(b[0], b[1], b[2], nx, ny, nz, r, g, bl, ro, me, ao)
+    this.push12(c[0], c[1], c[2], nx, ny, nz, r, g, bl, ro, me, ao)
   }
 
   quad(a: P3, b: P3, c: P3, d: P3, col: Rgb, mat: Mat): void {
@@ -119,60 +150,116 @@ function rnd(seed: number): number {
 function rackFace(b: Builder, place: (u: number, h: number, out: number) => P3, bayW: number, bayH: number, seed: number): void {
   const P = place
   const m = 0.05
+  const R = (k: number) => rnd(seed * 7.13 + k * 3.77)
 
-  // Rack front, then a proud surround so bays read as separate units.
-  b.quad(P(m, m, 0), P(m, bayH - m, 0), P(bayW - m, bayH - m, 0), P(bayW - m, m, 0), PANEL, M_PANEL)
+  // Each bay is a different piece of equipment, so each gets its own white.
+  // Identical panels across a whole wall is what made it read as a grid of
+  // rectangles rather than as a wall of hardware.
+  const tintK = 0.88 + R(1) * 0.2
+  const face: Rgb = [PANEL[0] * tintK, PANEL[1] * tintK, PANEL[2] * (tintK - 0.02)]
+  const roughK = 0.5 + R(2) * 0.3
+
+  // Rack front, set back behind a proud frame so the bay has real depth.
+  b.quad(P(m, m, -0.05), P(m, bayH - m, -0.05), P(bayW - m, bayH - m, -0.05), P(bayW - m, m, -0.05), face, [roughK, 0, 1])
+  // Frame: four sides standing out, plus their returns into the recess.
   for (const [u0, h0, u1, h1] of [
     [0, 0, bayW, m], [0, bayH - m, bayW, bayH], [0, 0, m, bayH], [bayW - m, 0, bayW, bayH],
   ]) {
-    b.quad(P(u0, h0, 0.025), P(u0, h1, 0.025), P(u1, h1, 0.025), P(u1, h0, 0.025), ALLOY, M_METAL)
+    b.quad(P(u0, h0, 0.035), P(u0, h1, 0.035), P(u1, h1, 0.035), P(u1, h0, 0.035), ALLOY, M_METAL)
   }
+  // Returns, which is what actually catches the light and gives the edge away.
+  b.quad(P(m, m, 0.035), P(m, m, -0.05), P(bayW - m, m, -0.05), P(bayW - m, m, 0.035), ALLOY, M_METAL)
+  b.quad(P(bayW - m, bayH - m, 0.035), P(bayW - m, bayH - m, -0.05), P(m, bayH - m, -0.05), P(m, bayH - m, 0.035), ALLOY, M_METAL)
+  b.quad(P(m, m, -0.05), P(m, m, 0.035), P(m, bayH - m, 0.035), P(m, bayH - m, -0.05), ALLOY, M_METAL)
+  b.quad(P(bayW - m, bayH - m, -0.05), P(bayW - m, bayH - m, 0.035), P(bayW - m, m, 0.035), P(bayW - m, m, -0.05), ALLOY, M_METAL)
 
-  // Recessed sub-panels with latches and labels.
+  // A strong horizontal seam two thirds up, as the ISS racks carry.
+  const seamY = m + (bayH - 2 * m) * 0.63
+  b.quad(P(m, seamY, -0.012), P(m, seamY + 0.03, -0.012), P(bayW - m, seamY + 0.03, -0.012), P(bayW - m, seamY, -0.012), ALLOY, M_METAL)
+
+  // Drawer fronts and sub-panels, each at its own depth so the wall has relief.
   const rows = 3
   const inner = bayH - 0.28
   for (let i = 0; i < rows; i++) {
     const h0 = m + 0.09 + (i * inner) / rows
     const h1 = h0 + inner / rows - 0.08
-    const tone = rnd(seed + i) > 0.6 ? PANEL_2 : PANEL
-    b.quad(P(m + 0.08, h0, -0.03), P(m + 0.08, h1, -0.03), P(bayW - m - 0.08, h1, -0.03), P(bayW - m - 0.08, h0, -0.03), tone, M_PANEL)
-    for (const u of [m + 0.15, bayW - m - 0.15]) {
-      b.quad(P(u - 0.03, h0 + 0.035, 0.008), P(u - 0.03, h0 + 0.082, 0.008), P(u + 0.03, h0 + 0.082, 0.008), P(u + 0.03, h0 + 0.035, 0.008), ALLOY, M_METAL)
+    const depth = -0.05 - 0.02 - R(10 + i) * 0.045
+    const k = 0.84 + R(20 + i) * 0.26
+    const tone: Rgb = R(30 + i) > 0.62 ? PANEL_2 : [face[0] * k, face[1] * k, face[2] * k]
+    b.quad(P(m + 0.08, h0, depth), P(m + 0.08, h1, depth), P(bayW - m - 0.08, h1, depth), P(bayW - m - 0.08, h0, depth), tone, [0.5 + R(40 + i) * 0.35, 0, 1])
+    // Side walls of the recess.
+    b.quad(P(m + 0.08, h0, depth), P(m + 0.08, h1, depth), P(m + 0.08, h1, -0.05), P(m + 0.08, h0, -0.05), ALLOY, M_METAL)
+    b.quad(P(bayW - m - 0.08, h1, depth), P(bayW - m - 0.08, h0, depth), P(bayW - m - 0.08, h0, -0.05), P(bayW - m - 0.08, h1, -0.05), ALLOY, M_METAL)
+    b.quad(P(m + 0.08, h1, depth), P(bayW - m - 0.08, h1, depth), P(bayW - m - 0.08, h1, -0.05), P(m + 0.08, h1, -0.05), ALLOY, M_METAL)
+
+    // A pull handle across the drawer: the single most recognisable rack fitting.
+    if (R(50 + i) > 0.35) {
+      const hy = (h0 + h1) / 2
+      b.box(...boxPts(P(m + 0.2, hy - 0.022, 0.012), P(bayW - m - 0.2, hy + 0.022, 0.052)), ALLOY, M_METAL)
+      for (const u of [m + 0.2, bayW - m - 0.2]) {
+        b.box(...boxPts(P(u - 0.02, hy - 0.03, -0.05), P(u + 0.02, hy + 0.03, 0.03)), ALLOY, M_METAL)
+      }
     }
-    if (rnd(seed * 3.1 + i) > 0.42) {
-      const lw = 0.15 + rnd(seed + i * 7) * 0.22
-      b.quad(P(m + 0.24, h1 - 0.08, 0.006), P(m + 0.24, h1 - 0.032, 0.006), P(m + 0.24 + lw, h1 - 0.032, 0.006), P(m + 0.24 + lw, h1 - 0.08, 0.006), LABEL, M_SOFT)
+    // Latch pairs.
+    for (const u of [m + 0.15, bayW - m - 0.15]) {
+      b.box(...boxPts(P(u - 0.032, h0 + 0.03, -0.05), P(u + 0.032, h0 + 0.088, 0.016)), ALLOY, M_METAL)
+    }
+    // Label strip.
+    if (R(60 + i) > 0.3) {
+      const lw = 0.14 + R(70 + i) * 0.24
+      b.quad(P(m + 0.24, h1 - 0.085, depth + 0.004), P(m + 0.24, h1 - 0.035, depth + 0.004), P(m + 0.24 + lw, h1 - 0.035, depth + 0.004), P(m + 0.24 + lw, h1 - 0.085, depth + 0.004), LABEL, M_SOFT)
+    }
+    // Connector ports and indicator studs along the drawer front.
+    const ports = Math.floor(R(80 + i) * 4)
+    for (let k2 = 0; k2 < ports; k2++) {
+      const u = m + 0.3 + k2 * 0.11 + R(90 + i + k2) * 0.04
+      if (u > bayW - m - 0.18) break
+      b.box(...boxPts(P(u - 0.021, h0 + 0.12, depth), P(u + 0.021, h0 + 0.162, depth + 0.028)), CABLE, M_RUBBER)
+      b.box(...boxPts(P(u - 0.012, h0 + 0.131, depth + 0.028), P(u + 0.012, h0 + 0.151, depth + 0.04)), ALLOY, M_METAL)
     }
   }
 
-  // One feature per bay: a vent, a stowage bag, or a caution placard.
-  const kind = rnd(seed * 5.7)
-  if (kind > 0.72) {
+  // One feature per bay: a vent, a stowage bag, a placard or a switch cluster.
+  const kind = R(100)
+  if (kind > 0.74) {
     const vh = 0.34
     const vy = bayH * 0.5 - vh / 2
     const u0 = bayW * 0.5 - 0.22
     const u1 = bayW * 0.5 + 0.22
-    b.quad(P(u0, vy, -0.05), P(u0, vy + vh, -0.05), P(u1, vy + vh, -0.05), P(u1, vy, -0.05), GRATE, M_SOFT)
+    b.quad(P(u0, vy, -0.1), P(u0, vy + vh, -0.1), P(u1, vy + vh, -0.1), P(u1, vy, -0.1), GRATE, M_SOFT)
+    b.quad(P(u0, vy, -0.1), P(u0, vy, -0.05), P(u0, vy + vh, -0.05), P(u0, vy + vh, -0.1), ALLOY, M_METAL)
+    b.quad(P(u1, vy + vh, -0.1), P(u1, vy + vh, -0.05), P(u1, vy, -0.05), P(u1, vy, -0.1), ALLOY, M_METAL)
     for (let i = 0; i < 8; i++) {
       const yy = vy + 0.025 + (i * (vh - 0.05)) / 7
-      b.quad(P(u0, yy, -0.018), P(u0, yy + 0.013, -0.018), P(u1, yy + 0.013, -0.018), P(u1, yy, -0.018), ALLOY, M_METAL)
+      b.box(...boxPts(P(u0, yy, -0.075), P(u1, yy + 0.014, -0.058)), ALLOY, M_METAL)
     }
-  } else if (kind > 0.46) {
+  } else if (kind > 0.5) {
     const bw = 0.44, bh = 0.32, dep = 0.19
     const u0 = bayW * 0.5 - bw / 2
     const h0 = bayH * 0.4
-    const face = rnd(seed) > 0.5 ? BAG : BAG_2
-    b.quad(P(u0, h0, dep), P(u0, h0 + bh, dep), P(u0 + bw, h0 + bh, dep), P(u0 + bw, h0, dep), face, M_SOFT)
-    b.quad(P(u0, h0, 0), P(u0, h0, dep), P(u0 + bw, h0, dep), P(u0 + bw, h0, 0), BAG_2, M_SOFT)
-    b.quad(P(u0, h0 + bh, dep), P(u0, h0 + bh, 0), P(u0 + bw, h0 + bh, 0), P(u0 + bw, h0 + bh, dep), BAG_2, M_SOFT)
-    b.quad(P(u0, h0, 0), P(u0, h0 + bh, 0), P(u0, h0 + bh, dep), P(u0, h0, dep), BAG_2, M_SOFT)
-    b.quad(P(u0 + bw, h0, dep), P(u0 + bw, h0 + bh, dep), P(u0 + bw, h0 + bh, 0), P(u0 + bw, h0, 0), BAG_2, M_SOFT)
+    const faceCol = R(110) > 0.5 ? BAG : BAG_2
+    b.quad(P(u0, h0, dep), P(u0, h0 + bh, dep), P(u0 + bw, h0 + bh, dep), P(u0 + bw, h0, dep), faceCol, M_SOFT)
+    b.quad(P(u0, h0, -0.05), P(u0, h0, dep), P(u0 + bw, h0, dep), P(u0 + bw, h0, -0.05), BAG_2, M_SOFT)
+    b.quad(P(u0, h0 + bh, dep), P(u0, h0 + bh, -0.05), P(u0 + bw, h0 + bh, -0.05), P(u0 + bw, h0 + bh, dep), BAG_2, M_SOFT)
+    b.quad(P(u0, h0, -0.05), P(u0, h0 + bh, -0.05), P(u0, h0 + bh, dep), P(u0, h0, dep), BAG_2, M_SOFT)
+    b.quad(P(u0 + bw, h0, dep), P(u0 + bw, h0 + bh, dep), P(u0 + bw, h0 + bh, -0.05), P(u0 + bw, h0, -0.05), BAG_2, M_SOFT)
     for (const t of [0.3, 0.72]) {
       const hh = h0 + bh * t
       b.quad(P(u0 - 0.025, hh, dep + 0.012), P(u0 - 0.025, hh + 0.018, dep + 0.012), P(u0 + bw + 0.025, hh + 0.018, dep + 0.012), P(u0 + bw + 0.025, hh, dep + 0.012), CABLE, M_RUBBER)
     }
-  } else if (kind > 0.33) {
-    b.quad(P(bayW - 0.32, bayH - 0.32, 0.007), P(bayW - 0.32, bayH - 0.19, 0.007), P(bayW - 0.13, bayH - 0.19, 0.007), P(bayW - 0.13, bayH - 0.32, 0.007), AMBER_L, M_SOFT)
+  } else if (kind > 0.3) {
+    // A cluster of switches and indicator lamps under a guard.
+    const u0 = bayW * 0.5 - 0.17
+    const hy = bayH * 0.52
+    b.quad(P(u0 - 0.03, hy - 0.06, -0.062), P(u0 - 0.03, hy + 0.1, -0.062), P(u0 + 0.37, hy + 0.1, -0.062), P(u0 + 0.37, hy - 0.06, -0.062), PANEL_2, M_PANEL)
+    for (let k2 = 0; k2 < 5; k2++) {
+      const u = u0 + 0.02 + k2 * 0.075
+      b.box(...boxPts(P(u - 0.016, hy, -0.062), P(u + 0.016, hy + 0.05, -0.028)), ALLOY, M_METAL)
+      b.box(...boxPts(P(u - 0.01, hy - 0.042, -0.062), P(u + 0.01, hy - 0.022, -0.05)), R(120 + k2) > 0.6 ? AMBER_L : CABLE, M_SOFT)
+    }
+    b.box(...boxPts(P(u0 - 0.03, hy + 0.1, -0.062), P(u0 + 0.37, hy + 0.115, -0.022)), ALLOY, M_METAL)
+  } else {
+    b.quad(P(bayW - 0.32, bayH - 0.32, -0.044), P(bayW - 0.32, bayH - 0.19, -0.044), P(bayW - 0.13, bayH - 0.19, -0.044), P(bayW - 0.13, bayH - 0.32, -0.044), AMBER_L, M_SOFT)
   }
 }
 
@@ -599,7 +686,7 @@ function sleepStations(b: Builder): void {
 function bakeAmbientOcclusion(mesh: MeshData): void {
   const v = mesh.vertices
   const stride = FLOATS_PER_VERTEX
-  const RAYS = 8
+  const RAYS = 6
   const dirs: P3[] = []
   for (let i = 0; i < RAYS; i++) {
     const t = (i + 0.5) / RAYS
@@ -607,7 +694,11 @@ function bakeAmbientOcclusion(mesh: MeshData): void {
     const theta = Math.PI * (1 + Math.sqrt(5)) * i
     dirs.push([Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)])
   }
-  const DIST = [0.2, 0.55, 1.2]
+  // Two probe distances rather than three. With the rack detail the mesh grew
+  // to around 228,000 vertices, and at 24 samples each the bake was a visible
+  // 300 ms hitch on mount. Twelve samples keeps the corner darkening that
+  // matters and halves the cost; the difference in the result is not visible.
+  const DIST = [0.22, 0.8]
 
   for (let o = 0; o < v.length; o += stride) {
     const px = v[o], py = v[o + 1], pz = v[o + 2]
