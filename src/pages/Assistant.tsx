@@ -92,7 +92,7 @@ export function Assistant() {
             <div ref={endRef} />
           </div>
           <form onSubmit={onSubmit} className="flex items-center gap-2 border-t border-border p-3">
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about crew health, alerts, radiation, the mission, or the simulator…" className="h-10 flex-1 rounded-sm border border-border-strong bg-surface-2/70 px-3 text-sm text-text-strong outline-none transition-colors placeholder:text-muted focus:border-accent" aria-label="Question" />
+            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about crew health, alerts, radiation, the mission, or the simulator…" className="h-10 flex-1 rounded-sm border border-border-strong bg-surface-2 px-3 text-sm text-text-strong outline-none transition-colors placeholder:text-muted focus:border-accent" aria-label="Question" />
             <Button type="submit" variant="primary" icon={<Send className="h-4 w-4" />} disabled={!input.trim() || thinking}>
               Ask
             </Button>

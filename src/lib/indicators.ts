@@ -10,7 +10,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'higher',
     description: 'Morning resting heart rate from the wearable biosensor (simulated).',
     decimals: 0,
-    color: '#ff7a85',
+    color: '#b58079',
   },
   hrv: {
     key: 'hrv',
@@ -21,7 +21,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Overnight RMSSD. Lower values can accompany fatigue, stress or illness; also varies naturally.',
     decimals: 0,
-    color: '#ffa36b',
+    color: '#bf9470',
   },
   systolicBP: {
     key: 'systolicBP',
@@ -32,7 +32,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'higher',
     description: 'Weekly-cadence measurement interpolated daily for display (simulated).',
     decimals: 0,
-    color: '#f075a4',
+    color: '#b27e92',
   },
   diastolicBP: {
     key: 'diastolicBP',
@@ -43,7 +43,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'higher',
     description: 'Weekly-cadence measurement interpolated daily for display (simulated).',
     decimals: 0,
-    color: '#c98fd6',
+    color: '#a78aa8',
   },
   sleepDuration: {
     key: 'sleepDuration',
@@ -54,7 +54,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Actigraphy-estimated total sleep time per 24 h period.',
     decimals: 1,
-    color: '#8ea6ff',
+    color: '#8794ad',
   },
   sleepConsistency: {
     key: 'sleepConsistency',
@@ -65,7 +65,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Regularity of sleep timing and duration over the trailing week (100 = perfectly regular).',
     decimals: 0,
-    color: '#a98df0',
+    color: '#9389ab',
   },
   sleepQuality: {
     key: 'sleepQuality',
@@ -76,7 +76,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Composite of sleep efficiency, awakenings and self-reported restfulness.',
     decimals: 0,
-    color: '#6fc9e8',
+    color: '#7f98a8',
   },
   exerciseMinutes: {
     key: 'exerciseMinutes',
@@ -87,7 +87,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Logged minutes on resistive and aerobic countermeasure hardware.',
     decimals: 0,
-    color: '#4fd0a6',
+    color: '#7fa391',
   },
   muscleStrength: {
     key: 'muscleStrength',
@@ -98,7 +98,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Periodic isokinetic strength test, expressed relative to pre-flight baseline.',
     decimals: 1,
-    color: '#7ed184',
+    color: '#8da87f',
   },
   boneDensity: {
     key: 'boneDensity',
@@ -109,7 +109,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Research-grade estimate of areal bone mineral density trend (not a clinical DXA).',
     decimals: 1,
-    color: '#aacf63',
+    color: '#a3a877',
   },
   radiationDaily: {
     key: 'radiationDaily',
@@ -120,7 +120,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'higher',
     description: 'Personal dosimeter effective-dose estimate per day.',
     decimals: 2,
-    color: '#ffb84d',
+    color: '#c3a068',
   },
   radiationCumulative: {
     key: 'radiationCumulative',
@@ -131,7 +131,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'higher',
     description: 'Running total of mission effective dose.',
     decimals: 0,
-    color: '#ff8a42',
+    color: '#c08a5e',
   },
   stress: {
     key: 'stress',
@@ -142,7 +142,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'higher',
     description: 'Daily check-in question answered by the crew member.',
     decimals: 1,
-    color: '#ff7d9b',
+    color: '#b57f8c',
   },
   mood: {
     key: 'mood',
@@ -153,7 +153,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'lower',
     description: 'Daily check-in question answered by the crew member.',
     decimals: 1,
-    color: '#58b6ea',
+    color: '#7f9cb0',
   },
   fatigue: {
     key: 'fatigue',
@@ -164,7 +164,7 @@ export const INDICATORS: Record<IndicatorKey, IndicatorMeta> = {
     worseWhen: 'higher',
     description: 'Self-reported fatigue combined with reaction-time test drift.',
     decimals: 1,
-    color: '#b69af5',
+    color: '#9b8fb5',
   },
 }
 

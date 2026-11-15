@@ -30,6 +30,7 @@ Other scripts:
 | `npm run preview` | Serves the production build locally |
 | `npm run typecheck` | TypeScript check only |
 | `npx tsx scripts/check-data.ts` | Prints the generated dataset, detected alerts, statuses and sample assistant answers |
+| `npm run archive` | Downloads the NASA archival photography the design uses into `public/archive/` and records its provenance |
 
 The production build is fully static (`dist/`) and can be hosted on GitHub Pages, Netlify, Vercel or any static file server. `vite.config.ts` uses a relative `base` so it works from a sub-path.
 
@@ -63,33 +64,65 @@ Extra features: historical mission playback (top-bar slider recomputes every ale
 
 ## Design system
 
-AURORA is styled as an **astronomical research archive reimagined as a mission-control
-instrument**: deep-space foundation, editorial display type, and technical annotation
-throughout. Every decorative element is drawn in code — there are no raster assets, so
-the production build carries no image weight.
+AURORA is built as a **historical NASA archive redesigned for the modern web**: the
+visual language comes from Apollo-era documentation — engineering blueprints,
+trajectory plotting charts, photographic contact sheets — not from a space theme
+applied to a dashboard. Everything is matte. There is no gloss, glow, gradient
+lighting or glassmorphism anywhere, and every corner is square.
 
-**Foundation.** Near-black with a midnight-blue cast (`#04070f`), charcoal-navy surfaces,
-hairline borders at low opacity, and cool-white through silver-gray type. Electric blue
-(`#4d8dff`) is the single accent; a NASA-inspired ember (`#ff7a35`) and signal red carry
-contrast and warnings. Corners are near-square throughout (1–4 px).
+**Three document stocks.** The page is matte black (`#101010`) through charcoal
+(`#191919`) and graphite (`#292929`), with warm off-white (`#E5E2DA`) and dusty
+silver (`#A5A5A0`) for type. Punctuating it are two real stocks, used as surfaces
+rather than accents:
 
-**Three voices.** Instrument Serif for oversized editorial display (`.display`), IBM Plex
-Sans for the interface, and IBM Plex Mono for telemetry and archival annotation. Two
-utility classes carry the technical register: `.eyebrow` (letterspaced caps, as on an
-instrument panel) and `.annotate` (monospaced margin notes, as on a plate).
+| Stock | Where | Token |
+|---|---|---|
+| Cobalt engineering sheet | `.blueprint` | `--cobalt #1A4078`, white line work |
+| Aged chart stock | `.stock` | `--paper #DDD6C4`, `--ink #15130E` |
+| Rust ink | callouts, caution marks | `--rust #A8512C` |
 
-**Atmosphere.** `components/visual/` holds the generated layers — a deterministic star
-catalogue on two parallax planes, a faint coordinate grid, film grain, and the planetary
-limb, graticules, orbital rings and insignia. `MissionHero` composes these into the
-masthead, with the planet lit from the right so the type stays legible on the left.
+**The three archival documents** carry the interface rather than cards:
 
-**Two themes.** Dark is deep space. Light is *archival paper* — the same system read as a
-scanned document, with the planet rendered as a pale engraving. Both are driven entirely
-by the CSS custom properties at the top of `src/index.css`; change a token there and the
-whole application follows.
+- **`Blueprint`** — the system schematic drawn as an engineering sheet: dimension
+  line, acquisition stack, balloon callouts, a NOTES block and a ruled title block
+  (`DWG. AUR-001`). The five indicator families and their counts are read from the
+  data layer, so the drawing is accurate, not decorative.
+- **`PlottingChart`** — the mission profile as a polar chart on aged stock, after
+  the trajectory charts issued for Apollo. Angle is mission day around the full
+  circle; radius is the mission phase. Events sit at their own day and phase, with
+  a typed significant-events table beside them. It replaces the old linear timeline
+  and keeps click-to-set-day.
+- **`ContactSheet`** — frames mounted as prints on trimmed paper mats with typed
+  caption strips, laid out as a contact sheet with fixed offsets.
 
-**Motion** is restrained and respects `prefers-reduced-motion`: slow celestial drift,
-pointer parallax in the hero, hairlines that brighten on approach, and elegant reveals.
+**Three voices.** Newsreader for editorial serif headings and pull quotes, IBM Plex
+Sans for the interface, IBM Plex Mono for telemetry, catalogue numbers and every
+annotation on a drawing. `.eyebrow` sets stencilled caps; `.annotate` sets margin
+notes. Sections are numbered as plates, figures and drawings.
+
+**Texture.** Paper fibre on the page (`body::before`), film grain over the frame
+(`.grain`), a halftone screen on every photograph, a stipple screen on the
+blueprint, and reticle crosses on survey frames — all generated from CSS and
+inline SVG, with no texture assets.
+
+**Photography.** `npm run archive` pulls the frames from NASA's public image
+library into `public/archive/` and writes real provenance to
+`src/data/archiveCredits.ts`. Nothing is hard-coded: each slot is resolved by
+querying the library, so the credits are the ones NASA supplies. Frames render
+monochrome and matte through `.photo`. Until the script runs, each plate shows as
+an empty archival sleeve with its reference printed on it — a designed state, not
+a broken image.
+
+> NASA imagery is generally not subject to copyright in the United States, but the
+> **NASA insignia and logotype are not public domain** and are used nowhere in this
+> project. The AURORA mark in `components/visual/Insignia.tsx` is original.
+
+**Two themes.** Dark is the archive. Light is the same archive printed on warm
+stock. Both run off the custom properties at the top of `src/index.css`.
+
+**Motion** is deliberately slight and respects `prefers-reduced-motion`: slow
+photographic parallax, gentle plate reveals, nothing else. The design is intended
+to be beautiful completely static.
 
 ### Project structure
 
@@ -100,14 +133,17 @@ src/
   lib/          Pure logic: stats, anomaly rules, health scoring, simulator, assistant, report
   hooks/        MissionProvider — the local data layer and app state
   components/   Reusable UI, charts, alert cards, timeline, tour, profile modal
-    visual/     Generated atmosphere: star field, planetary limb, insignia, diagrams
+    visual/     Blueprint, plotting chart, contact sheet, plates, insignia
   pages/        One component per section
 docs/
   METHODOLOGY.md    Scientific methodology and model equations
   DATA_SOURCES.md   Real data sources and how each is used
   DEMO_SCRIPT.md    Five-minute demonstration script for judges
+public/
+  archive/          NASA archival photography (populated by npm run archive)
 scripts/
   check-data.ts     Developer sanity check for the data pipeline
+  fetch-archive.mjs Resolves and downloads the archival frames, writes credits
 ```
 
 The data layer (`src/data`, `src/lib`) has no React dependency and can be unit-tested or reused independently.

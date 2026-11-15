@@ -1,50 +1,43 @@
 import { useId } from 'react'
 
 /**
- * The AURORA mark: an original mission insignia drawn from the programme's own
- * idea — an aurora arc rising over a planetary limb, crossed by an orbit.
- * Nothing here reproduces an existing agency emblem.
+ * The AURORA mark, drawn as an engraving: an aurora arc rising over a
+ * planetary limb, crossed by an orbit. Flat strokes only — no gradient, no
+ * fill lighting. Nothing here reproduces an agency emblem; NASA's insignia and
+ * logotype are not public domain and are used nowhere in this project.
  */
-
 export function Insignia({ size = 34, className = '' }: { size?: number; className?: string }) {
-  // Scoped per instance: several marks can share a page without clashing defs
   const id = useId().replace(/:/g, '')
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" className={`shrink-0 ${className}`} aria-hidden="true">
       <defs>
-        <linearGradient id={`${id}-limb`} x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.2" />
-          <stop offset="55%" stopColor="var(--accent-2)" stopOpacity="0.85" />
-          <stop offset="100%" stopColor="var(--text-strong)" />
-        </linearGradient>
         <clipPath id={`${id}-disc`}>
-          <circle cx="32" cy="32" r="29" />
+          <circle cx="32" cy="32" r="28" />
         </clipPath>
       </defs>
 
-      <circle cx="32" cy="32" r="29" fill="var(--bg-deep)" />
-
       <g clipPath={`url(#${id}-disc)`}>
-        {/* Planetary limb sweeping below the frame */}
-        <circle cx="32" cy="63" r="30" fill="none" stroke={`url(#${id}-limb)`} strokeWidth="4" />
-        <circle cx="32" cy="63" r="22" fill="var(--surface)" />
-        {/* The aurora itself */}
-        <path d="M4 44 Q32 27 60 44" fill="none" stroke="var(--ember)" strokeWidth="1.6" opacity="0.85" />
+        {/* The limb, and the body below it held as a flat tone */}
+        <circle cx="32" cy="62" r="29" fill="var(--surface-3)" />
+        <circle cx="32" cy="62" r="29" fill="none" stroke="currentColor" strokeWidth="1.25" />
+        {/* The aurora */}
+        <path d="M3 43 Q32 26 61 43" fill="none" stroke="var(--ember)" strokeWidth="1.5" />
       </g>
 
+      {/* Orbit */}
       <ellipse
         cx="32"
         cy="32"
-        rx="29"
-        ry="11"
+        rx="28"
+        ry="10.5"
         fill="none"
-        stroke="var(--accent)"
-        strokeWidth="1.6"
-        opacity="0.5"
+        stroke="currentColor"
+        strokeWidth="1"
+        opacity="0.75"
         transform="rotate(-22 32 32)"
       />
-      <circle cx="32" cy="32" r="29" fill="none" stroke="var(--border-strong)" strokeWidth="1.5" />
-      <circle cx="46.5" cy="19" r="2.3" fill="var(--text-strong)" />
+      <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <circle cx="45.5" cy="19.5" r="1.9" fill="currentColor" />
     </svg>
   )
 }
@@ -53,31 +46,30 @@ export function Insignia({ size = 34, className = '' }: { size?: number; classNa
  * The full patch, with the programme name set around the rim — used where the
  * mark is given room to breathe.
  */
-export function MissionPatch({ size = 160, className = '', spin = true }: { size?: number; className?: string; spin?: boolean }) {
+export function MissionPatch({ size = 160, className = '' }: { size?: number; className?: string }) {
   const rim = `rim-${useId().replace(/:/g, '')}`
   return (
     <div className={`relative shrink-0 ${className}`} style={{ width: size, height: size }} aria-hidden="true">
-      <svg viewBox="0 0 200 200" className={`absolute inset-0 ${spin ? 'orbit-slow' : ''}`}>
+      <svg viewBox="0 0 200 200" className="absolute inset-0">
         <defs>
-          <path id={rim} d="M100,100 m-82,0 a82,82 0 1,1 164,0 a82,82 0 1,1 -164,0" />
+          <path id={rim} d="M100,100 m-84,0 a84,84 0 1,1 168,0 a84,84 0 1,1 -168,0" />
         </defs>
         <text
-          fill="var(--muted)"
-          style={{ fontFamily: 'var(--font-sans)', fontSize: 9.5, fontWeight: 600, letterSpacing: '0.34em' }}
+          fill="currentColor"
+          style={{ fontFamily: 'var(--font-sans)', fontSize: 8.5, fontWeight: 500, letterSpacing: '0.38em' }}
         >
           <textPath href={`#${rim}`} startOffset="0%">
             AUTONOMOUS UNDERSTANDING OF RISK · OBSERVATION · ASTRONAUT RESILIENCE ·
           </textPath>
         </text>
+        <g fill="none" stroke="currentColor" strokeWidth="0.75" opacity="0.5">
+          <circle cx="100" cy="100" r="72" />
+          <circle cx="100" cy="100" r="68" strokeDasharray="1 6" />
+        </g>
       </svg>
 
-      <svg viewBox="0 0 200 200" className="absolute inset-0">
-        <circle cx="100" cy="100" r="70" fill="none" stroke="var(--border-strong)" strokeWidth="1" />
-        <circle cx="100" cy="100" r="66" fill="none" stroke="var(--border)" strokeWidth="1" strokeDasharray="2 5" />
-      </svg>
-
-      <div className="absolute inset-[22%]">
-        <Insignia size={size * 0.56} />
+      <div className="absolute inset-[26%]">
+        <Insignia size={size * 0.48} />
       </div>
     </div>
   )
