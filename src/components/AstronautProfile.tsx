@@ -30,16 +30,16 @@ export function AstronautProfile({ astronaut, onClose }: { astronaut: Astronaut;
   const delta = (k: IndicatorKey) => mean(last7.map((r) => r[k])) - mean(prior.map((r) => r[k]))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 backdrop-blur-sm sm:items-center sm:p-6" style={{ background: 'var(--scrim)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6" style={{ background: 'var(--scrim)' }} onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-t-md border border-border-strong bg-bg shadow-2xl sm:rounded-md"
+        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-t-md border border-border-strong bg-bg sm:rounded-md"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="sticky top-0 z-10 flex items-start gap-4 border-b border-border bg-surface/95 px-5 py-4 backdrop-blur-xl">
+        <div className="sticky top-0 z-10 flex items-start gap-4 border-b border-border bg-surface px-5 py-4">
           <Avatar astronaut={astronaut} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">

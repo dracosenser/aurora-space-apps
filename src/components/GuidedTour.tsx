@@ -70,7 +70,7 @@ export function GuidedTour({ open, onClose }: { open: boolean; onClose: () => vo
   return (
     <AnimatePresence>
       {open && (
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="panel ticked fixed bottom-4 left-4 right-4 z-50 mx-auto max-w-md rounded-md border-accent/35 p-4 shadow-2xl backdrop-blur-xl md:left-auto">
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} className="panel ticked fixed bottom-4 left-4 right-4 z-50 mx-auto max-w-md rounded-md border-accent/35 p-4 md:left-auto">
           <div className="flex items-start gap-3">
             <Logo size={28} />
             <div className="min-w-0 flex-1">

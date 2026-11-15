@@ -47,7 +47,7 @@ export function TopBar({ onMenu, onTour }: { onMenu: () => void; onTour: () => v
   const pct = ((m.viewDay - 45) / (MISSION.currentDay - 45)) * 100
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border bg-bg/70 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-border bg-bg">
       <div className="flex h-[58px] items-center gap-3 px-4 md:px-6">
         <button className="rounded-sm p-1.5 text-muted transition-colors hover:text-text-strong lg:hidden" onClick={onMenu} aria-label="Open navigation">
           <Menu className="h-5 w-5" />
@@ -56,11 +56,10 @@ export function TopBar({ onMenu, onTour }: { onMenu: () => void; onTour: () => v
         {/* Mission identity + telemetry */}
         <div className="flex min-w-0 items-center gap-3">
           <span className="relative flex h-2 w-2 shrink-0 items-center justify-center">
-            <span className={`absolute h-2 w-2 rounded-full ${m.isLive ? 'bg-ok/30 pulse' : 'bg-warn/30'}`} />
-            <span className={`h-1 w-1 rounded-full ${m.isLive ? 'bg-ok' : 'bg-warn'}`} />
+            <span className={`h-1.5 w-1.5 ${m.isLive ? 'bg-ok pulse' : 'bg-warn'}`} />
           </span>
           <div className="min-w-0 leading-tight">
-            <p className="truncate text-[13px] font-medium text-text-strong">
+            <p className="truncate text-[13px] text-text-strong">
               {MISSION.name}
               <span className="ml-2 font-normal text-muted">{phase.name}</span>
             </p>
@@ -73,10 +72,10 @@ export function TopBar({ onMenu, onTour }: { onMenu: () => void; onTour: () => v
 
         {/* Desktop controls */}
         <div className="ml-auto hidden items-center gap-2 md:flex">
-          <div className="flex items-center gap-2.5 rounded-sm border border-border bg-surface-2/60 px-2.5 py-1.5">
+          <div className="flex items-center gap-3 border border-border px-3 py-1.5">
             <button
               onClick={() => setPlaying((p) => !p)}
-              className="rounded-xs text-muted transition-colors hover:text-accent"
+              className="text-muted transition-colors hover:text-text-strong"
               aria-label={playing ? 'Pause playback' : 'Play mission history'}
               title="Historical mission playback"
             >
@@ -118,7 +117,7 @@ export function TopBar({ onMenu, onTour }: { onMenu: () => void; onTour: () => v
           </Button>
           <button
             onClick={() => m.setTheme(m.theme === 'dark' ? 'light' : 'dark')}
-            className="rounded-sm border border-border p-2 text-muted transition-colors hover:border-border-strong hover:text-text-strong"
+            className="border border-border p-2 text-muted transition-colors hover:border-border-strong hover:text-text-strong"
             aria-label="Toggle theme"
             title={m.theme === 'dark' ? 'Archival paper view' : 'Deep space view'}
           >

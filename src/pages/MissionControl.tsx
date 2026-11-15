@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, Clock, Radiation, ShieldAlert, Users } from 'lucide-react'
+import { ArrowRight, Radiation, ShieldAlert, Users } from 'lucide-react'
 import type { IndicatorKey } from '../types'
 import { useMission, ASTRONAUTS, EVENTS, MISSION } from '../hooks/useMission'
 import { phaseForDay } from '../data/mission'
@@ -8,7 +8,6 @@ import { mean } from '../lib/stats'
 import { fmtDate, fmtElapsed } from '../lib/format'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
-import { Badge, severityTone } from '../components/ui/Badge'
 import { Segmented } from '../components/ui/Controls'
 import { Disclaimer, Kpi, RuledHeading } from '../components/ui/Misc'
 import { ScoreRing } from '../components/charts/Sparkline'
@@ -16,9 +15,13 @@ import { TimeSeriesChart } from '../components/charts/TimeSeriesChart'
 import { AstronautCard } from '../components/AstronautCard'
 import { AstronautProfile } from '../components/AstronautProfile'
 import { AlertCard } from '../components/AlertCard'
-import { TimelineStrip, EVENT_ICONS } from '../components/TimelineStrip'
 import { SpaceWeather } from '../components/SpaceWeather'
 import { MissionHero } from '../components/MissionHero'
+import { ARCHIVE, ARCHIVE_LIST } from '../data/archive'
+import { ArchivePhoto } from '../components/visual/ArchivePhoto'
+import { ContactSheet } from '../components/visual/ContactSheet'
+import { PlottingChart } from '../components/visual/PlottingChart'
+import { Coordinates } from '../components/visual/Celestial'
 
 const TREND_OPTIONS: { value: IndicatorKey; label: string }[] = [
   { value: 'restingHR', label: 'Resting HR' },
@@ -51,8 +54,6 @@ export function MissionControl() {
     return rows
   }, [m.records, m.viewDay, trendKey])
 
-  const recentEvents = EVENTS.filter((e) => e.day <= m.viewDay).slice(-5).reverse()
-  const nextEvent = EVENTS.find((e) => e.day > m.viewDay)
   const profileAstro = ASTRONAUTS.find((a) => a.id === profile)
 
   return (
@@ -127,6 +128,44 @@ export function MissionControl() {
         </div>
       </section>
 
+      {/* ------------------------------------------------------ field record */}
+      <section className="mb-14">
+        <RuledHeading note="NASA PUBLIC DOMAIN · CONTACT SHEET">Field record</RuledHeading>
+
+        <div className="mb-9 grid gap-x-8 gap-y-8 lg:grid-cols-12">
+          <ArchivePhoto
+            className="lg:col-span-7"
+            frame={ARCHIVE['lunar-survey']}
+            ratio="16 / 10"
+            reticles
+            parallax
+            screen={0.55}
+          />
+          <div className="lg:col-span-5 lg:pt-8">
+            <p className="display-italic text-[clamp(1.2rem,2vw,1.6rem)] leading-snug text-text-strong">
+              “The crew must be its own clinic — Earth is forty minutes away, and
+              evacuation is years away.”
+            </p>
+            <p className="mt-5 text-[13px] leading-relaxed text-muted">
+              AURORA reads the same signals a flight surgeon would, continuously, and
+              explains every one of them. The photographic record is drawn from NASA's
+              public archive; the crew telemetry beside it is synthetic and labelled as
+              such on every page.
+            </p>
+            <Coordinates
+              className="mt-7"
+              rows={[
+                ['SOURCE', 'NASA IMAGE & VIDEO LIBRARY'],
+                ['RIGHTS', 'PUBLIC DOMAIN · NOT NASA-ENDORSED'],
+                ['TREATMENT', 'MONOCHROME · HALFTONE SCREEN'],
+              ]}
+            />
+          </div>
+        </div>
+
+        <ContactSheet frames={ARCHIVE_LIST.slice(1)} />
+      </section>
+
       {/* -------------------------------------------------- trends & signals */}
       <section className="mb-10">
         <RuledHeading note="LAST 90 MISSION DAYS">Trends &amp; signals</RuledHeading>
@@ -178,44 +217,9 @@ export function MissionControl() {
       </section>
 
       {/* --------------------------------------------------------- timeline */}
-      <section className="mb-10">
-        <RuledHeading note={`${EVENTS.length} LOGGED EVENTS`}>Mission timeline</RuledHeading>
-        <div className="grid gap-4 xl:grid-cols-5">
-          <Card className="xl:col-span-3" title="Transit profile" plate="FIG. 2" subtitle={`${MISSION.totalDays}-day mission · ${MISSION.phases.length} phases`}>
-            <TimelineStrip events={EVENTS} viewDay={m.viewDay} onSelectDay={m.setViewDay} />
-          </Card>
-
-          <Card className="xl:col-span-2" title="Event log" plate="MOST RECENT FIRST" flush bodyClassName="divide-y divide-border">
-            {nextEvent && (
-              <div className="flex items-start gap-3 px-4 py-3 opacity-60">
-                <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-text-strong">Next: {nextEvent.title}</p>
-                  <p className="annotate mt-0.5">MD {nextEvent.day} · IN {nextEvent.day - m.viewDay} DAYS</p>
-                </div>
-              </div>
-            )}
-            {recentEvents.map((e) => {
-              const Icon = EVENT_ICONS[e.type]
-              return (
-                <div key={e.id} className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-2/50">
-                  <Icon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${e.severity === 'caution' ? 'text-danger' : e.severity === 'watch' ? 'text-warn' : 'text-accent'}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-xs font-medium text-text-strong">{e.title}</p>
-                      <Badge tone={severityTone(e.severity)}>{e.type}</Badge>
-                    </div>
-                    <p className="annotate mt-0.5">
-                      MD {e.day}
-                      {e.endDay ? `–${e.endDay}` : ''} · {fmtDate(e.day).toUpperCase()}
-                    </p>
-                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted">{e.description}</p>
-                  </div>
-                </div>
-              )
-            })}
-          </Card>
-        </div>
+      <section className="mb-14">
+        <RuledHeading note={`CHART AUR-002 · ${EVENTS.length} PLOTTED EVENTS`}>Mission profile</RuledHeading>
+        <PlottingChart events={EVENTS} viewDay={m.viewDay} onSelectDay={m.setViewDay} />
       </section>
 
       {/* --------------------------------------------------------- footnotes */}

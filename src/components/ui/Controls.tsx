@@ -19,7 +19,7 @@ export function Select<T extends string>({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className="h-9 rounded-sm border border-border-strong bg-surface-2/70 px-2.5 text-sm text-text-strong outline-none transition-colors focus:border-accent"
+        className="h-9 rounded-sm border border-border-strong bg-surface-2 px-2.5 text-sm text-text-strong outline-none transition-colors focus:border-accent"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -44,7 +44,7 @@ export function Segmented<T extends string>({
   size?: 'sm' | 'md'
 }) {
   return (
-    <div className="inline-flex rounded-sm border border-border bg-surface-2/60 p-0.5">
+    <div className="inline-flex rounded-sm border border-border bg-surface-2 p-0.5">
       {options.map((o) => (
         <button
           key={o.value}

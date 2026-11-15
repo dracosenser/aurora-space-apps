@@ -1,10 +1,11 @@
-import { Activity, BookOpen, Bot, FlaskConical, LayoutDashboard, Presentation, ShieldAlert, X, type LucideIcon } from 'lucide-react'
+import { Activity, BookOpen, Bot, FlaskConical, HeartPulse, LayoutDashboard, Presentation, ShieldAlert, X, type LucideIcon } from 'lucide-react'
 import type { PageId } from '../../types'
 import { useMission } from '../../hooks/useMission'
 import { Insignia } from '../visual/Insignia'
 
 export const NAV: { id: PageId; label: string; icon: LucideIcon; group: 'operations' | 'about' }[] = [
   { id: 'mission-control', label: 'Mission Control', icon: LayoutDashboard, group: 'operations' },
+  { id: 'self-check', label: 'Self-Assessment', icon: HeartPulse, group: 'operations' },
   { id: 'crew-health', label: 'Crew Health Analytics', icon: Activity, group: 'operations' },
   { id: 'early-warning', label: 'Early Warning', icon: ShieldAlert, group: 'operations' },
   { id: 'simulator', label: 'What-If Simulator', icon: FlaskConical, group: 'operations' },
@@ -26,9 +27,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {/* Masthead */}
       <div className="flex items-center justify-between gap-2 border-b border-border px-5 pb-5 pt-6">
         <button onClick={() => setPage('mission-control')} className="group flex items-center gap-3 text-left">
-          <Insignia size={34} className="transition-transform duration-500 group-hover:rotate-[8deg]" />
+          <Insignia size={32} className="text-text-strong" />
           <div>
-            <p className="display text-xl leading-none tracking-[0.06em]">AURORA</p>
+            <p className="display text-[22px] leading-none tracking-[0.04em]">AURORA</p>
             <p className="eyebrow-sm mt-1.5">Health Intelligence</p>
           </div>
         </button>
@@ -37,10 +38,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </button>
       </div>
 
-      <nav className="flex-1 space-y-7 overflow-y-auto px-3 py-6">
+      <nav className="flex-1 overflow-y-auto py-2">
         {(['operations', 'about'] as const).map((group) => (
-          <div key={group}>
-            <p className="eyebrow-sm mb-2.5 px-2">{group === 'operations' ? 'Operations' : 'Project'}</p>
+          <div key={group} className="mb-6 last:mb-0">
+            <p className="eyebrow-sm border-b border-border px-4 py-3">{group === 'operations' ? 'Operations' : 'Project'}</p>
             <ul>
               {NAV.filter((n) => n.group === group).map((n) => {
                 const active = page === n.id
@@ -52,23 +53,23 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         setPage(n.id)
                         onClose()
                       }}
-                      className={`group relative flex w-full items-center gap-3 rounded-sm py-2.5 pl-3 pr-2 text-left text-[13px] transition-colors duration-200 ${
-                        active ? 'bg-accent/[0.07] text-text-strong' : 'text-text hover:bg-surface-3/50 hover:text-text-strong'
+                      className={`group relative flex w-full items-center gap-3 border-b border-border py-3 pl-4 pr-2 text-left text-[13px] transition-colors duration-300 ${
+                        active ? 'text-text-strong' : 'text-text hover:text-text-strong'
                       }`}
                     >
                       {/* Active rule, drawn rather than filled */}
                       <span
-                        className={`absolute left-0 top-1/2 h-5 w-px -translate-y-1/2 transition-all duration-300 ${
-                          active ? 'bg-accent opacity-100' : 'bg-transparent opacity-0'
+                        className={`absolute left-0 top-0 bottom-px w-px transition-opacity duration-300 ${
+                          active ? 'bg-text-strong opacity-100' : 'opacity-0'
                         }`}
                       />
-                      <span className={`mono text-[10px] tabular-nums ${active ? 'text-accent' : 'text-faint group-hover:text-muted'}`}>
+                      <span className={`mono text-[10px] tabular-nums ${active ? 'text-text-strong' : 'text-faint'}`}>
                         {String(index).padStart(2, '0')}
                       </span>
-                      <n.icon className={`h-[15px] w-[15px] shrink-0 ${active ? 'text-accent' : 'text-muted group-hover:text-text'}`} />
+                      <n.icon className={`h-[14px] w-[14px] shrink-0 ${active ? 'text-text-strong' : 'text-faint group-hover:text-muted'}`} />
                       <span className="flex-1 leading-snug">{n.label}</span>
                       {n.id === 'early-warning' && activeCount > 0 && (
-                        <span className="mono rounded-xs bg-ember/15 px-1.5 py-0.5 text-[10px] font-semibold text-ember">{activeCount}</span>
+                        <span className="mono border border-ember/40 px-1.5 py-px text-[10px] text-ember">{activeCount}</span>
                       )}
                     </button>
                   </li>
@@ -81,7 +82,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
       <div className="border-t border-border px-5 py-4">
         <p className="eyebrow-sm">NASA Space Apps 2026</p>
-        <p className="display-italic mt-2 text-[13px] leading-snug text-text">
+        <p className="display-italic mt-2.5 text-[14px] leading-snug text-text">
           Every explorer matters.
           <br />
           Every signal counts.
@@ -93,11 +94,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <>
-      <aside className="relative z-20 hidden w-[244px] shrink-0 border-r border-border bg-surface/80 backdrop-blur-xl lg:block">{content}</aside>
+      <aside className="relative z-20 hidden w-[248px] shrink-0 border-r border-border bg-bg lg:block">{content}</aside>
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 backdrop-blur-sm" style={{ background: 'var(--scrim)' }} onClick={onClose} />
-          <aside className="absolute inset-y-0 left-0 w-[270px] border-r border-border bg-surface shadow-2xl">{content}</aside>
+          <div className="absolute inset-0" style={{ background: 'var(--scrim)' }} onClick={onClose} />
+          <aside className="absolute inset-y-0 left-0 w-[272px] border-r border-border bg-bg">{content}</aside>
         </div>
       )}
     </>

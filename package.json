@@ -11,7 +11,8 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:engine": "npx tsx scripts/check-engine.ts"
+    "check:engine": "npx tsx scripts/check-engine.ts",
+    "archive": "node scripts/fetch-archive.mjs"
   },
   "dependencies": {
     "framer-motion": "^11.11.17",

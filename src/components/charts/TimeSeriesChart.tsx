@@ -37,7 +37,7 @@ function CustomTooltip({ active, payload, label, unit, decimals, xLabel, showDat
   if (!active || !payload?.length) return null
   return (
     <div
-      className="rounded-sm border border-border-strong px-3 py-2.5 shadow-2xl backdrop-blur-md"
+      className="rounded-sm border border-border-strong px-3 py-2.5"
       style={{ background: 'var(--tooltip-bg)' }}
     >
       <p className="annotate mb-2 border-b border-border pb-1.5 text-muted">

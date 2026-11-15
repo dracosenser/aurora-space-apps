@@ -5,3 +5,7 @@ dist-ssr
 .DS_Store
 *.tsbuildinfo
 .vite
+
+# Archival photography is fetched, not committed (npm run archive)
+public/archive/*
+!public/archive/.gitkeep

@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion'
-import { Activity, ArrowRight, Bot, BookOpen, FlaskConical, Lightbulb, Orbit, ShieldAlert, Target, Telescope, TriangleAlert } from 'lucide-react'
+import { ArrowRight, BookOpen, Lightbulb, Orbit, Target, TriangleAlert } from 'lucide-react'
 import { useMission } from '../hooks/useMission'
-import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { MissionPatch } from '../components/visual/Insignia'
-import { LocalStars } from '../components/visual/Atmosphere'
+import { Blueprint } from '../components/visual/Blueprint'
+import { RuledHeading } from '../components/ui/Misc'
 
 export function Presentation() {
   const m = useMission()
@@ -15,14 +15,13 @@ export function Presentation() {
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        className="panel ticked relative overflow-hidden rounded-md px-6 py-10 md:px-10 md:py-14"
+        className="panel ticked relative overflow-hidden px-6 py-12 md:px-12 md:py-16"
       >
-        <LocalStars seed={31415} count={60} />
-        <div className="plate-grid pointer-events-none absolute inset-0 opacity-50" />
+        <div className="plate-grid pointer-events-none absolute inset-0" />
 
         {/* The patch, set in the right margin */}
-        <div className="pointer-events-none absolute -right-10 top-1/2 hidden -translate-y-1/2 opacity-70 lg:block">
-          <MissionPatch size={260} />
+        <div className="pointer-events-none absolute -right-12 top-1/2 hidden -translate-y-1/2 opacity-45 lg:block">
+          <MissionPatch size={250} className="text-muted" />
         </div>
 
         <div className="relative max-w-2xl">
@@ -65,25 +64,26 @@ export function Presentation() {
         </Section>
       </div>
 
-      <Card className="mt-4" title="How AURORA works" subtitle="Five connected capabilities, one data layer">
-        <div className="grid gap-3 md:grid-cols-5">
+      {/* The system, drawn as an engineering sheet rather than listed as cards */}
+      <section className="mt-10">
+        <RuledHeading note="DWG. AUR-001 · REV. B">How AURORA works</RuledHeading>
+        <Blueprint />
+        <div className="mt-5 grid gap-x-8 gap-y-4 border-t border-border pt-5 sm:grid-cols-2 lg:grid-cols-5">
           {[
-            { icon: Activity, title: 'Monitor', body: 'Daily indicators across cardiovascular, sleep, physical, radiation and behavioral categories for every crew member.' },
-            { icon: Telescope, title: 'Analyse', body: 'Interactive time series, date-range filters, crew comparison and historical trend tables.' },
-            { icon: ShieldAlert, title: 'Warn', body: 'Transparent statistical rules flag level shifts, irregularity, risky combinations and crew-wide events, each with a confidence rationale.' },
-            { icon: FlaskConical, title: 'Simulate', body: 'A what-if model projects muscle, bone, sleep, fatigue, heart rate and dose against the baseline plan as parameters change.' },
-            { icon: Bot, title: 'Explain', body: 'A local assistant answers questions from the live data, shows its reasoning and separates fact from hypothesis.' },
-          ].map((s, i) => (
-            <motion.div key={s.title} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 * i }} className="rounded-md border border-border bg-surface-2 p-3">
-              <s.icon className="h-4 w-4 text-accent" />
-              <p className="mt-2 text-sm font-semibold text-text-strong">
-                {i + 1}. {s.title}
-              </p>
-              <p className="mt-1 text-xs leading-relaxed text-text">{s.body}</p>
-            </motion.div>
+            { title: 'Monitor', body: 'Daily indicators across cardiovascular, sleep, physical, radiation and behavioral categories for every crew member.' },
+            { title: 'Analyse', body: 'Interactive time series, date-range filters, crew comparison and historical trend tables.' },
+            { title: 'Warn', body: 'Transparent statistical rules flag level shifts, irregularity, risky combinations and crew-wide events, each with a confidence rationale.' },
+            { title: 'Simulate', body: 'A what-if model projects muscle, bone, sleep, fatigue, heart rate and dose against the baseline plan as parameters change.' },
+            { title: 'Explain', body: 'A local assistant answers questions from the live data, shows its reasoning and separates fact from hypothesis.' },
+          ].map((c, i) => (
+            <div key={c.title}>
+              <p className="eyebrow-sm">{String(i + 1).padStart(2, '0')}</p>
+              <p className="mt-1.5 text-[13px] font-medium text-text-strong">{c.title}</p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{c.body}</p>
+            </div>
           ))}
         </div>
-      </Card>
+      </section>
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <Section icon={BookOpen} title="How NASA data and research contribute" accent="info">

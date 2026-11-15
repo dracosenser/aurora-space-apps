@@ -114,11 +114,11 @@ export function CrewHealth() {
           <div className="flex items-end gap-2">
             <label className="flex flex-col gap-1 eyebrow">
               From MD
-              <input type="number" min={1} max={m.viewDay} value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-sm border border-border-strong bg-surface-2/70 px-2 text-sm text-text-strong outline-none transition-colors focus:border-accent" />
+              <input type="number" min={1} max={m.viewDay} value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-sm border border-border-strong bg-surface-2 px-2 text-sm text-text-strong outline-none transition-colors focus:border-accent" />
             </label>
             <label className="flex flex-col gap-1 eyebrow">
               To MD
-              <input type="number" min={1} max={m.viewDay} value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-sm border border-border-strong bg-surface-2/70 px-2 text-sm text-text-strong outline-none transition-colors focus:border-accent" />
+              <input type="number" min={1} max={m.viewDay} value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: parseInt(e.target.value || '1', 10) }))} className="mono h-9 w-24 rounded-sm border border-border-strong bg-surface-2 px-2 text-sm text-text-strong outline-none transition-colors focus:border-accent" />
             </label>
           </div>
         )}

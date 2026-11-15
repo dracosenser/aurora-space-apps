@@ -4,21 +4,20 @@ type Variant = 'primary' | 'outline' | 'ghost' | 'danger' | 'ember'
 type Size = 'sm' | 'md'
 
 /**
- * Instrument-panel buttons: squared corners, hairline borders, no gloss.
- * The primary action earns its weight from contrast — cool white on near-black
- * — leaving electric blue to do its work as an accent rather than a fill.
+ * Rectangular, matte, unfilled by default. The primary action is simply ink
+ * reversed out of the stock — there is no gloss, gradient or shadow anywhere.
  */
 const VARIANTS: Record<Variant, string> = {
-  primary: 'border-transparent bg-text-strong font-medium text-bg hover:brightness-[1.08]',
-  outline: 'border-border-strong bg-surface-2/60 text-text hover:border-accent/55 hover:bg-surface-3/70 hover:text-text-strong',
-  ghost: 'border-transparent text-muted hover:bg-surface-3/70 hover:text-text-strong',
-  danger: 'border-danger/35 bg-danger/10 text-danger hover:bg-danger/18',
-  ember: 'border-ember/40 bg-ember/10 text-ember hover:bg-ember/18',
+  primary: 'border-text-strong bg-text-strong font-medium text-bg hover:bg-text hover:border-text',
+  outline: 'border-border-strong bg-transparent text-text hover:bg-surface-3 hover:text-text-strong',
+  ghost: 'border-transparent bg-transparent text-muted hover:text-text-strong',
+  danger: 'border-danger/40 bg-transparent text-danger hover:bg-surface-3',
+  ember: 'border-ember/45 bg-transparent text-ember hover:bg-surface-3',
 }
 
 const SIZES: Record<Size, string> = {
-  sm: 'h-7 px-2.5 text-[11px] gap-1.5 tracking-wide',
-  md: 'h-9 px-3.5 text-[13px] gap-2',
+  sm: 'h-7 px-2.5 text-[10px] gap-1.5 uppercase tracking-[0.14em]',
+  md: 'h-9 px-4 text-[11px] gap-2 uppercase tracking-[0.16em]',
 }
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -31,7 +30,7 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 export function Button({ variant = 'outline', size = 'md', icon, children, className = '', ...rest }: Props) {
   return (
     <button
-      className={`inline-flex items-center justify-center rounded-sm border transition-[background-color,border-color,color,filter] duration-200 disabled:cursor-not-allowed disabled:opacity-45 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={`inline-flex items-center justify-center border font-medium transition-colors duration-300 disabled:cursor-not-allowed disabled:opacity-40 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...rest}
     >
       {icon}

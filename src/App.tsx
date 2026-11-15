@@ -7,6 +7,7 @@ import { GuidedTour } from './components/GuidedTour'
 import { Atmosphere } from './components/visual/Atmosphere'
 import { MissionControl } from './pages/MissionControl'
 
+const SelfCheck = lazy(() => import('./pages/SelfCheck').then((m) => ({ default: m.SelfCheck })))
 const CrewHealth = lazy(() => import('./pages/CrewHealth').then((m) => ({ default: m.CrewHealth })))
 const EarlyWarning = lazy(() => import('./pages/EarlyWarning').then((m) => ({ default: m.EarlyWarning })))
 const Simulator = lazy(() => import('./pages/Simulator').then((m) => ({ default: m.Simulator })))
@@ -34,6 +35,13 @@ export default function App() {
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
 
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
+        {/* Doc-control bar — the document metadata strip the frame always carries */}
+        <div className="flex items-center gap-x-5 gap-y-1 overflow-hidden border-b border-border px-4 py-1.5 md:px-6">
+          <span className="annotate shrink-0">DOC NO. AUR-MED-01</span>
+          <span className="annotate hidden shrink-0 sm:inline">REV C</span>
+          <span className="annotate hidden shrink-0 md:inline">FORM 8-246</span>
+          <span className="annotate ml-auto shrink-0 text-ember">SYNTHETIC CREW DATA</span>
+        </div>
         <TopBar onMenu={() => setMenuOpen(true)} onTour={() => setTourOpen(true)} />
         <main className="mx-auto w-full max-w-[1680px] flex-1 px-4 py-5 md:px-6">
           <Suspense
@@ -53,6 +61,7 @@ export default function App() {
                 transition={{ duration: 0.34, ease: [0.16, 1, 0.3, 1] }}
               >
                 {page === 'mission-control' && <MissionControl />}
+                {page === 'self-check' && <SelfCheck />}
                 {page === 'crew-health' && <CrewHealth />}
                 {page === 'early-warning' && <EarlyWarning />}
                 {page === 'simulator' && <Simulator />}
