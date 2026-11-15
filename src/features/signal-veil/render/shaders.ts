@@ -143,14 +143,24 @@ void main() {
   // During the dissolve the thinnest fog goes first.
   float amount = clamp(uFog * 1.5 - (1.0 - body) * 0.5, 0.0, 1.0);
   float density = mix(0.74, 1.0, body) * (0.9 + 0.1 * fine);
-  vec4 run = runners(p, t);
   float fogged = amount * (1.0 - clear);
+  // Runners are scaled by fogged wherever they are used, so on glass that has
+  // been wiped they contribute nothing. Skipping them there is free.
+  vec4 run = fogged > 0.002 ? runners(p, t) : vec4(0.0);
   float fog = fogged * density * (1.0 - run.x * 0.62);
 
   // ---- Condensation beads. They sit on fogged glass and gather along wipe edges.
-  vec3 b1 = beadLayer(p, 27.0, 1.0, 0.5);
-  vec3 b2 = beadLayer(p, 14.0, 7.0, 0.2);
   float presence = clamp(fogged * 0.85 + wipeEdge * amount * 0.9, 0.0, 1.0);
+  // Both bead layers are scaled by presence, so where the glass is clear and
+  // away from a wipe edge they cannot contribute. These two calls are the most
+  // expensive thing in the shader — nine jittered cells each — so skipping them
+  // on cleared glass is where most of the cost goes as the visor is wiped.
+  vec3 b1 = vec3(0.0);
+  vec3 b2 = vec3(0.0);
+  if (presence > 0.004) {
+    b1 = beadLayer(p, 27.0, 1.0, 0.5);
+    b2 = beadLayer(p, 14.0, 7.0, 0.2);
+  }
   float runPresence = fogged;
   vec2 normal = (b1.xy * 0.6 + b2.xy) * presence + run.zw * runPresence;
   float bead = clamp(max(b1.z * 0.75, b2.z) * presence + run.y * runPresence, 0.0, 1.0);

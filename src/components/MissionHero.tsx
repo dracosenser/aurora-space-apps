@@ -3,15 +3,14 @@ import { ArrowRight } from 'lucide-react'
 import { useMission, ASTRONAUTS, MISSION } from '../hooks/useMission'
 import { phaseForDay } from '../data/mission'
 import { fmtDate, fmtElapsed } from '../lib/format'
-import { ARCHIVE } from '../data/archive'
-import { ArchivePhoto } from './visual/ArchivePhoto'
+import { MissionPatch } from './visual/Insignia'
 import { Coordinates } from './visual/Celestial'
 
 /**
  * The masthead, set as the opening spread of a publication: a running head, an
- * oversized serif title held against a cropped archival plate, and a ruled
- * telemetry strip closing the spread. Asymmetric by design — the plate breaks
- * the column grid and overlaps the type column on wide screens.
+ * oversized serif title held against the mission insignia, and a ruled
+ * telemetry strip closing the spread. Asymmetric by design — seven columns of
+ * type against five of insignia.
  */
 export function MissionHero() {
   const m = useMission()
@@ -82,16 +81,15 @@ export function MissionHero() {
             />
           </div>
 
-          {/* ------------------------------------------------ plate column */}
-          <div className="reveal lg:col-span-5 lg:-mt-10" style={{ animationDelay: '120ms' }}>
-            <ArchivePhoto
-              frame={ARCHIVE.masthead}
-              ratio="4 / 5"
-              parallax
-              priority
-              screen={0.45}
-              caption="below"
-            />
+          {/* ---------------------------------------------- mission insignia */}
+          <div className="reveal flex flex-col items-center lg:col-span-5 lg:items-start lg:pt-4" style={{ animationDelay: '120ms' }}>
+            <MissionPatch size={280} className="max-w-full text-text-strong" />
+            <div className="mt-6 w-full border-t border-border pt-3">
+              <p className="annotate">MISSION INSIGNIA · AURORA</p>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">
+                Drawn for this project. Not a NASA insignia and not NASA-endorsed.
+              </p>
+            </div>
           </div>
         </div>
       </div>

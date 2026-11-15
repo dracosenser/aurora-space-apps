@@ -17,9 +17,6 @@ import { AstronautProfile } from '../components/AstronautProfile'
 import { AlertCard } from '../components/AlertCard'
 import { SpaceWeather } from '../components/SpaceWeather'
 import { MissionHero } from '../components/MissionHero'
-import { ARCHIVE, ARCHIVE_LIST } from '../data/archive'
-import { ArchivePhoto } from '../components/visual/ArchivePhoto'
-import { ContactSheet } from '../components/visual/ContactSheet'
 import { PlottingChart } from '../components/visual/PlottingChart'
 import { Coordinates } from '../components/visual/Celestial'
 
@@ -128,42 +125,33 @@ export function MissionControl() {
         </div>
       </section>
 
-      {/* ------------------------------------------------------ field record */}
+      {/* ------------------------------------------------------- the premise */}
       <section className="mb-14">
-        <RuledHeading note="NASA PUBLIC DOMAIN · CONTACT SHEET">Field record</RuledHeading>
+        <RuledHeading note="WHY THIS EXISTS">The premise</RuledHeading>
 
-        <div className="mb-9 grid gap-x-8 gap-y-8 lg:grid-cols-12">
-          <ArchivePhoto
-            className="lg:col-span-7"
-            frame={ARCHIVE['lunar-survey']}
-            ratio="16 / 10"
-            reticles
-            parallax
-            screen={0.55}
-          />
-          <div className="lg:col-span-5 lg:pt-8">
-            <p className="display-italic text-[clamp(1.2rem,2vw,1.6rem)] leading-snug text-text-strong">
+        <div className="grid gap-x-8 gap-y-6 lg:grid-cols-12">
+          <div className="lg:col-span-7">
+            <p className="display-italic text-[clamp(1.3rem,2.3vw,1.9rem)] leading-snug text-text-strong">
               “The crew must be its own clinic — Earth is forty minutes away, and
               evacuation is years away.”
             </p>
-            <p className="mt-5 text-[13px] leading-relaxed text-muted">
+          </div>
+          <div className="lg:col-span-5 lg:pt-2">
+            <p className="text-[13px] leading-relaxed text-muted">
               AURORA reads the same signals a flight surgeon would, continuously, and
-              explains every one of them. The photographic record is drawn from NASA's
-              public archive; the crew telemetry beside it is synthetic and labelled as
-              such on every page.
+              explains every one of them. Every value on this page is synthetic
+              demonstration data, generated deterministically and labelled as such.
             </p>
             <Coordinates
-              className="mt-7"
+              className="mt-6"
               rows={[
-                ['SOURCE', 'NASA IMAGE & VIDEO LIBRARY'],
-                ['RIGHTS', 'PUBLIC DOMAIN · NOT NASA-ENDORSED'],
-                ['TREATMENT', 'MONOCHROME · HALFTONE SCREEN'],
+                ['DATASET', 'SYNTHETIC — DETERMINISTIC SEED'],
+                ['ANALYSIS', 'RUNS ENTIRELY IN THIS BROWSER'],
+                ['STATUS', 'NOT A MEDICAL DEVICE'],
               ]}
             />
           </div>
         </div>
-
-        <ContactSheet frames={ARCHIVE_LIST.slice(1)} />
       </section>
 
       {/* -------------------------------------------------- trends & signals */}

@@ -30,7 +30,6 @@ Other scripts:
 | `npm run preview` | Serves the production build locally |
 | `npm run typecheck` | TypeScript check only |
 | `npx tsx scripts/check-data.ts` | Prints the generated dataset, detected alerts, statuses and sample assistant answers |
-| `npm run archive` | Downloads the NASA archival photography the design uses into `public/archive/` and records its provenance |
 
 The production build is fully static (`dist/`) and can be hosted on GitHub Pages, Netlify, Vercel or any static file server. `vite.config.ts` uses a relative `base` so it works from a sub-path.
 
@@ -110,7 +109,7 @@ assume otherwise.
 
 ## Design system
 
-AURORA is built as a **historical NASA archive redesigned for the modern web**: the
+AURORA is built as **historical NASA documentation redesigned for the modern web**: the
 visual language comes from Apollo-era documentation — engineering blueprints,
 trajectory plotting charts, photographic contact sheets — not from a space theme
 applied to a dashboard. Everything is matte. There is no gloss, glow, gradient
@@ -138,8 +137,7 @@ rather than accents:
   circle; radius is the mission phase. Events sit at their own day and phase, with
   a typed significant-events table beside them. It replaces the old linear timeline
   and keeps click-to-set-day.
-- **`ContactSheet`** — frames mounted as prints on trimmed paper mats with typed
-  caption strips, laid out as a contact sheet with fixed offsets.
+
 
 **Three voices.** Newsreader for editorial serif headings and pull quotes, IBM Plex
 Sans for the interface, IBM Plex Mono for telemetry, catalogue numbers and every
@@ -177,19 +175,8 @@ bounces and no spring overshoot; everything eases on a single curve
 blueprint, and reticle crosses on survey frames — all generated from CSS and
 inline SVG, with no texture assets.
 
-**Photography.** `npm run archive` pulls the frames from NASA's public image
-library into `public/archive/` and writes real provenance to
-`src/data/archiveCredits.ts`. Nothing is hard-coded: each slot is resolved by
-querying the library, so the credits are the ones NASA supplies. Frames render
-monochrome and matte through `.photo`. Until the script runs, each plate shows as
-an empty archival sleeve with its reference printed on it — a designed state, not
-a broken image.
 
-> NASA imagery is generally not subject to copyright in the United States, but the
-> **NASA insignia and logotype are not public domain** and are used nowhere in this
-> project. The AURORA mark in `components/visual/Insignia.tsx` is original.
-
-**Two themes.** Dark is the archive. Light is the same archive printed on warm
+**Two themes.** Dark is the console. Light is the same document printed on warm
 stock. Both run off the custom properties at the top of `src/index.css`.
 
 **Motion** is deliberately slight and respects `prefers-reduced-motion`: slow
@@ -219,10 +206,8 @@ docs/
   DATA_SOURCES.md   Real data sources and how each is used
   DEMO_SCRIPT.md    Five-minute demonstration script for judges
 public/
-  archive/          NASA archival photography (populated by npm run archive)
 scripts/
   check-data.ts     Developer sanity check for the data pipeline
-  fetch-archive.mjs Resolves and downloads the archival frames, writes credits
 ```
 
 The data layer (`src/data`, `src/lib`) has no React dependency and can be unit-tested or reused independently.

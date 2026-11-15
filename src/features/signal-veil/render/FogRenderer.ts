@@ -49,6 +49,16 @@ class WebGLFogSurface implements FogSurface {
   private maskVersion = -1
   private maskSize = ''
   private lost = false
+  /** Immutable storage dimensions of the scene texture, '' when unallocated. */
+  private sceneTexSize = ''
+  /**
+   * generateMipmap over a full-resolution scene is the single most expensive
+   * call in the frame. The mip chain only feeds the frosted blur (lod 1.2 and
+   * up), so refreshing it on alternate frames is imperceptible; the base level
+   * that the lens reads is re-uploaded every frame regardless.
+   */
+  private frameIndex = 0
+  private mipsValid = false
   private readonly onLost = (e: Event) => {
     e.preventDefault()
     this.lost = true
@@ -99,6 +109,9 @@ class WebGLFogSurface implements FogSurface {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     this.maskVersion = -1
     this.maskSize = ''
+    this.sceneTexSize = ''
+    this.mipsValid = false
+    this.frameIndex = 0
 
     gl.disable(gl.DEPTH_TEST)
     gl.disable(gl.BLEND)
@@ -124,8 +137,34 @@ class WebGLFogSurface implements FogSurface {
     gl.bindTexture(gl.TEXTURE_2D, this.sceneTex)
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene)
-    gl.generateMipmap(gl.TEXTURE_2D)
+    // Immutable storage allocated once per size, then overwritten in place.
+    // texImage2D would reallocate the whole mip chain on every frame.
+    const sceneSize = `${scene.width}x${scene.height}`
+    if (sceneSize !== this.sceneTexSize) {
+      const levels = 1 + Math.floor(Math.log2(Math.max(scene.width, scene.height)))
+      // A texture can only be given immutable storage once, so size changes
+      // need a fresh object.
+      if (this.sceneTexSize !== '') {
+        gl.deleteTexture(this.sceneTex)
+        this.sceneTex = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, this.sceneTex)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+      }
+      gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA8, scene.width, scene.height)
+      this.sceneTexSize = sceneSize
+      this.mipsValid = false
+    }
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, scene)
+    // Refresh the blur chain on alternate frames, and always on the first frame
+    // at a new size so nothing is ever sampled from uninitialised levels.
+    if (!this.mipsValid || this.frameIndex % 2 === 0) {
+      gl.generateMipmap(gl.TEXTURE_2D)
+      this.mipsValid = true
+    }
+    this.frameIndex++
 
     // The wipe mask, uploaded only when it has changed.
     gl.activeTexture(gl.TEXTURE1)
@@ -163,6 +202,8 @@ class WebGLFogSurface implements FogSurface {
     if (this.vao) gl.deleteVertexArray(this.vao)
     if (this.program) gl.deleteProgram(this.program)
     this.sceneTex = this.maskTex = null
+    this.sceneTexSize = ''
+    this.mipsValid = false
     this.vao = null
     this.program = null
   }

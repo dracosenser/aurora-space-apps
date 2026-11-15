@@ -51,6 +51,23 @@ export interface SignalVeilCanvasProps {
 const MAX_DPR = 1.75
 
 /**
+ * The fog pass is the expensive half of the frame: its fragment shader evaluates
+ * roughly 160 hash lookups per pixel, so its cost scales with the pixels it
+ * covers. Because the fog is a soft, low-frequency blur, rendering it to a
+ * smaller buffer and letting the compositor scale it up is very close to
+ * visually free — far cheaper than dropping frames. The constellation canvas
+ * underneath always stays at full resolution, so text and line work remain crisp.
+ *
+ * The governor below starts at the top of this ladder and steps down only if
+ * frames actually run long on this machine, then creeps back up when they do not.
+ */
+const FOG_SCALES = [1, 0.82, 0.68, 0.55] as const
+/** Frame budget before stepping down. 60fps = 16.7ms; allow headroom for the rest of the page. */
+const SLOW_FRAME_MS = 20
+/** Comfortably fast frames for a sustained stretch earn a step back up. */
+const FAST_FRAME_MS = 11
+
+/**
  * The SIGNAL VEIL surface: a wipeable fogged visor over the live constellation.
  *
  * Two stacked canvases. The lower one is the crisp 2D constellation. The upper
@@ -152,6 +169,19 @@ export function SignalVeilCanvas(props: SignalVeilCanvasProps) {
       lensActive: () => latest.current.lens,
     })
 
+    // Adaptive fog resolution. `fogScaleIndex` only ever moves one step at a
+    // time, and a step costs one texture reallocation, so it is deliberately
+    // slow to react: a couple of stray long frames must not start it oscillating.
+    let fogScaleIndex = 0
+    let frameAvg = 16
+    let fastRun = 0
+
+    const applyFogSize = () => {
+      if (!fog) return
+      const scale = FOG_SCALES[fogScaleIndex]
+      fog.resize(Math.max(1, Math.round(sceneCanvas.width * scale)), Math.max(1, Math.round(sceneCanvas.height * scale)))
+    }
+
     const resize = () => {
       const rect = wrap.getBoundingClientRect()
       const w = Math.max(1, Math.round(rect.width))
@@ -163,7 +193,7 @@ export function SignalVeilCanvas(props: SignalVeilCanvasProps) {
       dpr = nextDpr
       sceneCanvas.width = Math.round(w * dpr)
       sceneCanvas.height = Math.round(h * dpr)
-      fog?.resize(sceneCanvas.width, sceneCanvas.height)
+      applyFogSize()
       layoutKey = ''
       dirty.current = true
     }
@@ -175,7 +205,7 @@ export function SignalVeilCanvas(props: SignalVeilCanvasProps) {
 
     const reportFog = (force: boolean) => {
       const f = mask.revealedFraction()
-      if (force || Math.abs(f - lastProgressSent) > 0.01) {
+      if (force || Math.abs(f - lastProgressSent) > 0.025) {
         lastProgressSent = f
         latest.current.onFogProgress?.(f)
       }
@@ -361,6 +391,27 @@ export function SignalVeilCanvas(props: SignalVeilCanvasProps) {
           lens: { x: pointerX / width, y: pointerY / height, radius: lensRadius() / height, on: lensOn },
           pointer: { x: pointerX / width, y: pointerY / height },
         })
+        // The whole frame, not just the GL call: WebGL is asynchronous, so
+        // measuring render() alone would mostly time the command submission.
+        // Only frames that actually ran the fog pass are measured; a cheap
+        // constellation-only frame says nothing about fog cost.
+        frameAvg += (Math.min(60, dt * 1000) - frameAvg) * 0.1
+        if (frameAvg > SLOW_FRAME_MS && fogScaleIndex < FOG_SCALES.length - 1) {
+          fogScaleIndex++
+          applyFogSize()
+          frameAvg = 16
+          fastRun = 0
+        } else if (frameAvg < FAST_FRAME_MS && fogScaleIndex > 0) {
+          // Only climb back after a sustained easy stretch, never on one quick frame.
+          if (++fastRun > 240) {
+            fogScaleIndex--
+            applyFogSize()
+            frameAvg = 16
+            fastRun = 0
+          }
+        } else {
+          fastRun = 0
+        }
       } else if (fogCanvas.style.opacity !== '0') {
         // Nothing to draw: leave the crisp scene canvas showing.
         fogCanvas.style.opacity = '0'
