@@ -5,7 +5,7 @@ import { EVENTS, MISSION } from '../data/mission'
 import { generateMissionRecords } from '../data/generator'
 import { detectAnomalies } from '../lib/anomaly'
 import { computeStatus, crewScore, type AstronautStatus } from '../lib/health'
-import { EMPTY_LOG, batteryComplete, newlyEarned, pointsForReading, type CrewLog } from '../lib/gamify'
+import { EMPTY_LOG, batteryComplete, newlyEarned, pointsForReading, type CrewLog, pointsForVeilStep } from '../lib/gamify'
 import type { CheckId } from '../data/selfcheck'
 
 /**
@@ -71,6 +71,8 @@ export interface MissionState extends PersistedState {
   logReading: (id: CheckId, value: number) => void
   /** Mark a protocol cleared for the current mission day. */
   clearProtocol: (id: string) => void
+  /** Bank SIGNAL VEIL steps onto the shared score and patch board. */
+  recordVeilProgress: (steps: string[]) => void
   /** Open a fresh duty period, restarting the countdown. */
   openPeriod: () => void
   resetDemo: () => void
@@ -81,7 +83,7 @@ const MissionContext = createContext<MissionState | null>(null)
 
 function pageFromHash(): PageId {
   const h = (window.location.hash || '').replace('#/', '').replace('#', '') as PageId
-  const valid: PageId[] = ['mission-control', 'crew-health', 'early-warning', 'simulator', 'assistant', 'sources', 'presentation']
+  const valid: PageId[] = ['mission-control', 'crew-health', 'early-warning', 'self-check', 'signal-veil', 'simulator', 'assistant', 'sources', 'presentation']
   return valid.includes(h) ? h : 'mission-control'
 }
 
@@ -181,10 +183,28 @@ export function MissionProvider({ children }: { children: ReactNode }) {
         return { ...s, log: next }
       }),
 
+    recordVeilProgress: (steps) =>
+      setState((s) => {
+        // Only steps not already banked count, so revisiting the visor cannot farm points.
+        const fresh = steps.filter((id) => !s.log.veil.includes(id))
+        if (!fresh.length) return s
+        const gained = fresh.reduce((sum, id) => sum + pointsForVeilStep(id), 0)
+        let next: CrewLog = {
+          ...s.log,
+          veil: [...s.log.veil, ...fresh],
+          points: s.log.points + gained,
+          periodOpenedAt: s.log.periodOpenedAt || Date.now(),
+        }
+        const earned = newlyEarned(next, s.viewDay)
+        if (earned.length) next = { ...next, patches: [...next.patches, ...earned], points: next.points + earned.length * 40 }
+        return { ...s, log: next }
+      }),
+
     openPeriod: () => setState((s) => ({ ...s, log: { ...s.log, periodOpenedAt: Date.now() } })),
     resetDemo: () => {
       try {
         localStorage.removeItem(LS_KEY)
+        localStorage.removeItem('aurora.veil.actions.v1')
       } catch {
         /* ignore */
       }

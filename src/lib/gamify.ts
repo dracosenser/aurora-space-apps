@@ -86,7 +86,37 @@ export const PATCHES: Patch[] = [
   { id: 'no-drift', label: 'No Drift', detail: 'Seven consecutive days without a missed battery.' },
   { id: 'sheltered', label: 'Sheltered', detail: 'Completed the radiation shelter drill under time.' },
   { id: 'all-clear', label: 'All Clear', detail: 'Cleared every protocol on the board in one duty period.' },
+  { id: 'visor-clear', label: 'Visor Clear', detail: 'Wiped the fog and revealed the whole constellation.' },
+  { id: 'first-contact', label: 'First Contact', detail: 'Traced a relationship the engine supports.' },
+  { id: 'full-sweep-veil', label: 'Signal Read', detail: 'Worked every step of the Signal Veil instrument.' },
 ]
+
+/**
+ * SIGNAL VEIL steps, scored on the same board as the self-assessment so the two
+ * halves of the application are one game rather than two. The ids match the
+ * keys of the feature's own ExperienceProgress, which is the only contract
+ * between them.
+ */
+export const VEIL_STEPS: { id: string; label: string; points: number }[] = [
+  { id: 'wiped', label: 'Wipe the fog from the visor', points: 10 },
+  { id: 'cleared', label: 'Reveal the whole constellation', points: 25 },
+  { id: 'inspected', label: 'Read a signal and its history', points: 15 },
+  { id: 'connected', label: 'Draw a line between two signals', points: 15 },
+  { id: 'foundSupported', label: 'Find a relationship the evidence supports', points: 40 },
+  { id: 'scrubbed', label: 'Travel through the mission timeline', points: 10 },
+  { id: 'replayed', label: 'Replay how the pattern developed', points: 25 },
+  { id: 'readFindings', label: "Read the engine's explanation", points: 20 },
+  { id: 'viewedResponse', label: 'See what followed the recorded action', points: 20 },
+]
+
+export const VEIL_STEP_BY_ID = Object.fromEntries(VEIL_STEPS.map((s) => [s.id, s])) as Record<
+  string,
+  { id: string; label: string; points: number }
+>
+
+export function pointsForVeilStep(id: string): number {
+  return VEIL_STEP_BY_ID[id]?.points ?? 0
+}
 
 export const PATCH_BY_ID = Object.fromEntries(PATCHES.map((p) => [p.id, p])) as Record<string, Patch>
 
@@ -102,6 +132,8 @@ export interface CrewLog {
   patches: string[]
   /** Real-clock ms at which the current duty period opened. */
   periodOpenedAt: number
+  /** SIGNAL VEIL steps already worked, by ExperienceProgress key. */
+  veil: string[]
 }
 
 export const EMPTY_LOG: CrewLog = {
@@ -113,6 +145,7 @@ export const EMPTY_LOG: CrewLog = {
   points: 0,
   patches: [],
   periodOpenedAt: 0,
+  veil: [],
 }
 
 /** How long a duty period runs, in real milliseconds. */
@@ -216,6 +249,11 @@ export function newlyEarned(log: CrewLog, day: number): string[] {
   if (complete && worstBand(log, day) === 'nominal' && !has('full-sweep')) earned.push('full-sweep')
   if (log.cleared['shelter'] === day && !has('sheltered')) earned.push('sheltered')
   if (PROTOCOLS.every((p) => log.cleared[p.id] === day) && !has('all-clear')) earned.push('all-clear')
+
+  const veil = new Set(log.veil)
+  if (veil.has('cleared') && !has('visor-clear')) earned.push('visor-clear')
+  if (veil.has('foundSupported') && !has('first-contact')) earned.push('first-contact')
+  if (VEIL_STEPS.every((s) => veil.has(s.id)) && !has('full-sweep-veil')) earned.push('full-sweep-veil')
 
   return earned
 }

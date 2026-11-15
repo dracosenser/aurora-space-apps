@@ -41,6 +41,7 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 | Section | Purpose |
 |---|---|
 | **Self-Assessment** | The crew member's own station. Eight readings taken and entered by hand, each with how to take it, why it matters in spaceflight, a reference band drawn to scale and a written action for the band it lands in. A clickable human figure opens five body systems. Duty-period countdown, readiness instrument, protocols and mission patches |
+| **Signal Veil** | The signature instrument, now a page of the application rather than a separate demo. A fogged EVA visor you wipe clear to reveal one crew member's health signals as a constellation, driven by the Constellation Engine. Inspect a signal, draw a connection, scrub the mission timeline, replay how a pattern developed, record a response. Runs on the app's own crew records, with a crew switcher |
 | **Mission Control** | Mission elapsed time, phase, crew size, crew composite status, individual astronaut cards with sparklines, 90-day crew trend chart, recent alerts, interactive mission timeline, event log, optional live NASA space-weather feed |
 | **Crew Health Analytics** | Five categories (cardiovascular, sleep, physical, radiation, behavioral), 15 indicators, date-range presets and custom ranges, individual vs crew comparison, alert windows and mission events drawn on charts, 7-day smoothing, historical trend table |
 | **Early Warning Intelligence** | Explainable rule-based anomaly detection. Each alert shows what changed, when, which indicators, why it fired, confidence with rationale, and what to review. Filters by status, severity and crew member |
@@ -50,6 +51,21 @@ The production build is fully static (`dist/`) and can be hosted on GitHub Pages
 | **Space Apps Presentation** | Problem, relevance, how it works, NASA contribution, innovation, limitations and future work |
 
 Extra features: historical mission playback (top-bar slider recomputes every alert and score for any past day), astronaut profile pages, exportable Markdown mission health report, dark/light mode, guided demo tour, demo reset button, responsive layout.
+
+### One game, two instruments
+
+The self-assessment and Signal Veil share a single board. `src/lib/gamify.ts`
+holds the score, the streak and the patches; `CrewLog.veil` records which Signal
+Veil steps have been worked, and the nine steps bank points onto the same total
+as a measurement battery. Three of the ten patches are earned in the visor —
+**Visor Clear**, **First Contact** and **Signal Read** — and they appear on the
+same patch grid as the self-assessment's. Steps bank once, so revisiting the
+visor cannot farm points, and `Reset demo` clears both halves.
+
+The two pages are deliberately different kinds of work. The self-assessment is
+the crew member measuring themselves and acting on a number. Signal Veil is the
+same crew member looking for what no single number shows: several indicators
+that each moved too little to trip an alert, but moved together.
 
 ### The self-assessment loop
 
@@ -83,6 +99,8 @@ assume otherwise.
 ## Technology
 
 - React 18 + Vite 6 + TypeScript (strict)
+- WebGL2 (GLSL ES 3.00) for the visor fog, with a Canvas 2D fallback
+- Vitest — 136 tests over the engine and the visor's pure model
 - Tailwind CSS 4
 - Recharts, Lucide React, Framer Motion
 - Instrument Serif, IBM Plex Sans and IBM Plex Mono (Google Fonts)
@@ -184,8 +202,14 @@ to be beautiful completely static.
 src/
   types/        Domain types (records, alerts, scenarios, sources)
   data/         Mission, crew, events, synthetic generator, scenario presets, sources
+  engine/       Constellation Engine: baselines, deviation, patterns, relationships,
+                joint statistics, timeline, response. No React, no DOM, 136 tests
+  features/
+    signal-veil/  The visor: model (pure, tested), render (Canvas 2D + WebGL2
+                  fog shader), ui (panels, charts, timeline, data table)
   lib/          Pure logic: stats, anomaly rules, health scoring, simulator, assistant, report
-                gamify.ts — protocols, patches, readiness, streaks, duty periods
+                gamify.ts — protocols, patches, readiness, streaks, duty periods,
+                and the Signal Veil step board
   hooks/        MissionProvider — the local data layer and app state
   components/   Reusable UI, charts, alert cards, tour, profile modal
     visual/     Blueprint, plotting chart, contact sheet, body figure, three-ring, insignia
