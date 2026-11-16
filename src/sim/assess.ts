@@ -25,12 +25,18 @@ export const DOMAINS: { id: DomainId; label: string; weight: number; covers: str
   { id: 'sleep', label: 'Sleep and alertness', weight: 0.3, covers: 'Accumulated sleep debt against the person’s sleep need, expected reaction-test lapses, sleep quality and regularity.' },
   { id: 'behavioral', label: 'Behavioral health', weight: 0.2, covers: 'Fatigue, stress and mood check-ins.' },
   { id: 'musculo', label: 'Muscle and bone', weight: 0.2, covers: 'Strength and bone loss from pre-flight, and exercise against the countermeasure dose.' },
-  { id: 'cardio', label: 'Cardiopulmonary', weight: 0.15, covers: 'Resting heart rate and HRV against the pre-flight baseline, blood-pressure stage, oxygen saturation.' },
+  { id: 'cardio', label: 'Cardiopulmonary', weight: 0.15, covers: 'Resting heart rate and HRV against the pre-flight baseline, blood-pressure stage, oxygen saturation, body temperature.' },
   { id: 'exposure', label: 'Cabin and radiation exposure', weight: 0.15, covers: 'Cabin conditions outside reference ranges, and radiation dose against the career limit.' },
 ]
 
 /** One weak area cannot be averaged away: the score is at most the weakest area + this margin. */
 export const WEAKEST_LINK_MARGIN = 30
+/** A fever (7-day mean core temperature at or above this) holds readiness in caution. */
+export const FEVER_C = 38
+/** Mean SpO₂ below this holds readiness in caution. */
+export const HYPOXEMIA_SPO2 = 90
+/** The ceiling applied by a fitness-for-duty flag (fever, hypoxemia). */
+export const DUTY_CEILING = 60
 /** NASA-STD-3001 Vol. 1 Rev. B (2022): career effective-dose limit for all astronauts. */
 export const CAREER_LIMIT_MSV = 600
 /** Exercise minutes per day the model treats as the full countermeasure dose. */
@@ -69,6 +75,8 @@ export interface Finding {
   /** What the astronaut's own simulated data shows, when the link is clear enough to report. */
   observed: string | null
   recommendation: Recommendation | null
+  /** A fitness-for-duty flag: the overall score cannot exceed this while it holds. */
+  ceiling?: number
 }
 
 export interface DomainResult {
@@ -89,6 +97,8 @@ export interface Assessment {
   /** Weighted mean of the areas before the weakest-area limit. */
   weighted: number
   capped: boolean
+  /** The finding that holds the score down regardless of the other areas, if any. */
+  heldBy: { title: string; ceiling: number } | null
   status: 'nominal' | 'watch' | 'caution'
   domains: DomainResult[]
   findings: Finding[]
@@ -530,6 +540,25 @@ function assessCore(config: MissionConfig, result: SimulationResult, astronautId
     causeUnit: '% SpO₂',
     observed: null,
     recommendation: environmentRecommendation(ctx, 'ppO2KPa', 'oxygen saturation'),
+    ceiling: o7 < HYPOXEMIA_SPO2 ? DUTY_CEILING : undefined,
+  })
+  const t7 = m('bodyTemp')
+  const hot = t7 >= 37.5
+  const tc = causesFor(run, ['bodyTemp'], from, to, hot ? 1 : -1)
+  const tPoints = t7 >= FEVER_C ? Math.min(60, 30 + 20 * (t7 - FEVER_C)) : hot ? 16 * (t7 - 37.5) : t7 < 36 ? Math.min(40, 15 * (36 - t7)) : 0
+  push('cardio', {
+    id: 'body-temp',
+    title: t7 >= FEVER_C ? `Fever (${t7.toFixed(1)} °C)` : hot ? `Raised body temperature (${t7.toFixed(1)} °C)` : `Low body temperature (${t7.toFixed(1)} °C)`,
+    evidence: `Core temperature averaged ${t7.toFixed(2)} °C over ${span} against a ${b.bodyTemp} °C pre-flight baseline. Normal is about 36.1–37.2 °C; ${FEVER_C}.0 °C or more is a fever.${b.bodyTemp >= 37.5 ? ` The baseline entered for ${name} is itself ${b.bodyTemp} °C, so they start the mission febrile: check the crew entry if that is not intended.` : ''}${t7 >= FEVER_C ? ` A fever holds readiness at ${DUTY_CEILING} or below until it resolves.` : ''}`,
+    source: 'Mackowiak et al., JAMA 268:1578 (1992): healthy mean 36.8 ± 0.4 °C. Fever threshold 38.0 °C as used clinically.',
+    points: tPoints,
+    causes: tc,
+    causeUnit: '°C',
+    observed: null,
+    recommendation: hot
+      ? { key: 'fever', action: `Have the flight surgeon evaluate ${name} for infection or heat illness, and stand them down from EVA and heavy exercise until temperature is below ${FEVER_C} °C.`, why: 'Fever lowers work capacity and heat tolerance; a suit and exercise add heat load.' }
+      : { key: 'cold', action: `Check ${name}'s thermal comfort and the cabin temperature, and confirm the reading with a second thermometer.`, why: 'Low readings are often a measurement artefact; true hypothermia needs a cold environment.' },
+    ceiling: t7 >= FEVER_C ? DUTY_CEILING : undefined,
   })
 
   // ---- Cabin and radiation exposure
@@ -584,9 +613,12 @@ function assessCore(config: MissionConfig, result: SimulationResult, astronautId
   const weighted = domains.reduce((a, x) => a + x.weight * x.score, 0)
   const weakest = Math.min(...domains.map((x) => x.score))
   const capped = weighted > weakest + WEAKEST_LINK_MARGIN
-  const score = Math.round(capped ? weakest + WEAKEST_LINK_MARGIN : weighted)
   const findings = domains.flatMap((x) => x.findings).sort((a, b) => b.impact - a.impact)
-  return { astronautId, name, day: d, from, to, score, weighted, capped, status: statusOf(score), domains, findings }
+  const base = capped ? weakest + WEAKEST_LINK_MARGIN : weighted
+  const flag = findings.filter((f) => f.ceiling !== undefined).sort((a, b) => a.ceiling! - b.ceiling!)[0]
+  const heldBy = flag && flag.ceiling! < base ? { title: flag.title, ceiling: flag.ceiling! } : null
+  const score = Math.round(heldBy ? heldBy.ceiling : base)
+  return { astronautId, name, day: d, from, to, score, weighted, capped: capped && !heldBy, heldBy, status: statusOf(score), domains, findings }
 }
 
 const cache = new Map<string, Assessment | null>()

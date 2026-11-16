@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Badge } from '../../components/ui/Badge'
-import { CAREER_LIMIT_MSV, DOMAINS, EXERCISE_DOSE_MIN, WEAKEST_LINK_MARGIN, assess, scoreSeries, testRecommendation, type Assessment, type Finding, type WhatIf } from '../../sim/assess'
+import { CAREER_LIMIT_MSV, DOMAINS, DUTY_CEILING, EXERCISE_DOSE_MIN, FEVER_C, HYPOXEMIA_SPO2, WEAKEST_LINK_MARGIN, assess, scoreSeries, testRecommendation, type Assessment, type Finding, type WhatIf } from '../../sim/assess'
 import { SLEEP_MODEL } from '../../sim/reference'
 import type { MissionConfig, SimulationResult } from '../../sim/types'
 
@@ -116,6 +116,11 @@ export function ReadinessPanel({ m, r, personId, day }: { m: MissionConfig; r: S
               </span>
             )}
           </p>
+          {a.heldBy && (
+            <p className="mt-2 max-w-56 text-[11px] leading-snug text-danger">
+              Held at {a.heldBy.ceiling} by a fitness-for-duty flag: {a.heldBy.title.toLowerCase()} (weighted mean {Math.round(a.weighted)}).
+            </p>
+          )}
           {a.capped && (
             <p className="mt-2 max-w-56 text-[11px] leading-snug text-muted">
               Held at {weakest.label.toLowerCase()} ({Math.round(weakest.score)}) + {WEAKEST_LINK_MARGIN}: one weak area is not averaged away (weighted mean {Math.round(a.weighted)}).
@@ -173,7 +178,10 @@ export function ReadinessPanel({ m, r, personId, day }: { m: MissionConfig; r: S
               <span className="text-text-strong">Sleep debt.</span> Each night adds (need − sleep) hours; debt decays with a {SLEEP_MODEL.decayDays}-day time constant. {SLEEP_MODEL.nightEquivalentH} h of debt impairs performance about as much as one night without sleep (Van Dongen et al., 2003), and costs 40 points per night-equivalent. The need is the astronaut's own setting (default {SLEEP_MODEL.defaultNeedH} h), never their usual sleep, so a short sleeper is not treated as rested.
             </p>
             <p>
-              <span className="text-text-strong">Other points.</span> Fatigue above 3.5 (7/pt), stress above 4.5 (6/pt), mood below 6 (8/pt); exercise below {EXERCISE_DOSE_MIN} min/day in reduced gravity (up to 25); strength loss beyond 2 % (2.5/%), bone loss beyond 0.5 % (12/%); resting HR beyond +2 bpm (4/bpm), HRV drop beyond 8 % (1.2/%), blood pressure stage 1 (10) or 2 (25), SpO₂ below 95 % (6/%); 10 per cabin parameter outside its reference range; radiation 60 × the share of the {CAREER_LIMIT_MSV} mSv career limit used.
+              <span className="text-text-strong">Other points.</span> Fatigue above 3.5 (7/pt), stress above 4.5 (6/pt), mood below 6 (8/pt); exercise below {EXERCISE_DOSE_MIN} min/day in reduced gravity (up to 25); strength loss beyond 2 % (2.5/%), bone loss beyond 0.5 % (12/%); resting HR beyond +2 bpm (4/bpm), HRV drop beyond 8 % (1.2/%), blood pressure stage 1 (10) or 2 (25), SpO₂ below 95 % (6/%), body temperature above 37.5 °C (16/°C) or a fever of {FEVER_C} °C or more (30, +20/°C); 10 per cabin parameter outside its reference range; radiation 60 × the share of the {CAREER_LIMIT_MSV} mSv career limit used.
+            </p>
+            <p>
+              <span className="text-text-strong">Fitness-for-duty flags.</span> A fever (7-day mean ≥ {FEVER_C} °C) or SpO₂ below {HYPOXEMIA_SPO2} % holds the score at {DUTY_CEILING} or below, whatever the other areas show, until it resolves.
             </p>
             <p>
               <span className="text-text-strong">Recommendations</span> are tested, not asserted: AURORA re-runs this astronaut's simulation with the change (from tomorrow when there is time left, otherwise from mission start) and reports the readiness it produces.

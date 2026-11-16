@@ -110,6 +110,8 @@ export function validateConfig(config: MissionConfig): ValidationIssue[] {
         issues.push({ level: 'error', area: 'crew', targetId: a.id, message: `${who}: ${label} is ${Number.isFinite(v) ? `${v}${unit ? ` ${unit}` : ''}` : 'empty'}. Set it between ${lo} and ${hi}${unit ? ` ${unit}` : ''}.` })
     }
     if (!a.name.trim()) issues.push({ level: 'warning', area: 'crew', targetId: a.id, message: `Crew member ${a.id} has no name.` })
+    if (b.bodyTemp >= 37.5 || b.bodyTemp < 35.5)
+      issues.push({ level: 'warning', area: 'crew', targetId: a.id, message: `${who}'s baseline body temperature is ${b.bodyTemp} °C. A baseline should be a healthy resting value (about 36.1–37.2 °C); ${b.bodyTemp >= 38 ? 'this one is a fever, so readiness will hold them in caution for the whole mission' : 'readiness will flag it every day'}.` })
     const need = b.sleepRequirement ?? SLEEP_MODEL.defaultNeedH
     if (b.sleepNeed < SLEEP_MODEL.needRange[0])
       issues.push({ level: 'warning', area: 'crew', targetId: a.id, message: `${who} usually sleeps ${b.sleepNeed} h but needs ${need} h. Every night short of the need adds to sleep debt, so expect falling performance (this is modeled, not an error).` })

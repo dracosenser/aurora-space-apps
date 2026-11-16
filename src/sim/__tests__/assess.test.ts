@@ -79,3 +79,19 @@ describe('readiness is driven by the data', () => {
     expect(musculo.findings.some((f) => f.recommendation?.key === 'exercise')).toBe(true)
   })
 })
+
+describe('fitness-for-duty flags', () => {
+  it('a fever holds readiness in caution even when everything else is fine', () => {
+    const m = crewOf(8, 8)
+    m.crew[0].baseline = { ...m.crew[0].baseline, bodyTemp: 39 }
+    const r = simulate(m)
+    const fever = assess(m, r, 'SHORT', 30)!
+    const well = assess(m, r, 'LONG', 30)!
+    expect(fever.findings.some((f) => f.id === 'body-temp' && /Fever/.test(f.title))).toBe(true)
+    expect(fever.heldBy).not.toBeNull()
+    expect(fever.score).toBeLessThanOrEqual(60)
+    expect(fever.status).toBe('caution')
+    expect(well.heldBy).toBeNull()
+    expect(well.findings.some((f) => f.id === 'body-temp')).toBe(false)
+  })
+})
