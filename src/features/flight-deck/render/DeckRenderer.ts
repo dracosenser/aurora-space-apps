@@ -185,7 +185,7 @@ export class DeckRenderer {
 
     for (const [name, prog, names] of [
       ['sky', this.skyProg, ['uRight', 'uUp', 'uFwd', 'uAspect', 'uTanHalfFov', 'uTime', 'uEarthDir', 'uEarthDist', 'uEarthR', 'uSunDir', 'uOct']],
-      ['scene', this.sceneProg, ['uViewProj', 'uLightViewProj', 'uModel', 'uLightPos', 'uLightCol', 'uLightCount', 'uEye', 'uAlert', 'uSunDir', 'uSunCol', 'uShadow', 'uShadowTexel', 'uEarthTint', 'uCupola', 'uPcf', 'uMaxLights']],
+      ['scene', this.sceneProg, ['uViewProj', 'uLightViewProj', 'uModel', 'uLightPos', 'uLightCol', 'uLightCount', 'uEye', 'uAlert', 'uSunDir', 'uSunCol', 'uShadow', 'uShadowTexel', 'uEarthTint', 'uCupola', 'uPcf', 'uMaxLights', 'uDetailRange']],
       ['emis', this.emisProg, ['uViewProj', 'uLightViewProj', 'uModel', 'uTime', 'uAlert']],
       ['depth', this.depthProg, ['uLightViewProj', 'uModel']],
       ['comp', this.compProg, ['uSky']],
@@ -660,6 +660,7 @@ export class DeckRenderer {
     gl.uniform1f(cu.uShadowTexel, 1 / Math.max(1, this.shadowSize))
     gl.uniform1i(cu.uPcf, this.q.pcf)
     gl.uniform1i(cu.uMaxLights, this.q.maxLights)
+    gl.uniform1f(cu.uDetailRange, this.q.detailRange)
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTex)
     gl.uniform1i(cu.uShadow, 0)

@@ -43,6 +43,13 @@ export interface Quality {
    * almost nothing visually and saves the square of itself in fill.
    */
   skyScale: number
+  /**
+   * How far from the eye, in metres, procedural surface detail is applied.
+   * 0 switches it off. It is the first thing a struggling machine should lose,
+   * because it is the only effect here that costs per pixel and adds nothing
+   * a viewer can name when it is gone.
+   */
+  detailRange: number
   /** Shadow map edge, in texels. 0 disables the sun shadow entirely. */
   shadowSize: number
   /** Percentage-closer-filter taps: 1 is a hard edge, 9 is a soft one. */
@@ -64,6 +71,7 @@ export const QUALITY: Record<QualityName, Quality> = {
     nativeFraction: 0.66,
     maxPixels: 1_100_000,
     skyScale: 0.4,
+    detailRange: 0,
     shadowSize: 0,
     pcf: 1,
     maxLights: 1,
@@ -74,6 +82,7 @@ export const QUALITY: Record<QualityName, Quality> = {
     nativeFraction: 0.85,
     maxPixels: 2_400_000,
     skyScale: 0.55,
+    detailRange: 4.5,
     shadowSize: 1024,
     pcf: 1,
     maxLights: 2,
@@ -84,6 +93,7 @@ export const QUALITY: Record<QualityName, Quality> = {
     nativeFraction: 1,
     maxPixels: 5_000_000,
     skyScale: 0.7,
+    detailRange: 7,
     shadowSize: 2048,
     pcf: 9,
     maxLights: 4,

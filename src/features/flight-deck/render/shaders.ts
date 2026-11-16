@@ -15,6 +15,80 @@
  * traced: an analytic ray-sphere intersection evaluated per pixel.
  */
 
+/**
+ * Surface micro-detail, generated rather than sampled.
+ *
+ * The brief asked for photographic material maps. Nothing in this environment
+ * can fetch one — outbound requests reach package registries and nothing else
+ * — so rather than ship flat colour and call it textured, the detail is
+ * computed. What it gives up against a real scan is variety: this is noise
+ * with a direction, not a photograph of a specific panel, and it will not
+ * produce a stain or a scuff that tells a story.
+ *
+ * Three things come out of one noise evaluation, which is what keeps it
+ * affordable. Albedo picks up a faint mottle, roughness breaks up so specular
+ * is not mirror-uniform across a whole panel, and the normal is perturbed to
+ * give the surface tooth.
+ *
+ * The normal perturbation uses screen-space derivatives rather than a tangent
+ * basis, which the mesh does not carry. Hardware computes dFdx and dFdy for
+ * the quad it is already shading, so the gradient costs close to nothing.
+ */
+const DETAIL = /* glsl */ `
+float hash31(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+// Smooth value noise. One lattice cell, trilinear, with a cubic fade.
+float vnoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash31(i + vec3(0,0,0));
+  float n100 = hash31(i + vec3(1,0,0));
+  float n010 = hash31(i + vec3(0,1,0));
+  float n110 = hash31(i + vec3(1,1,0));
+  float n001 = hash31(i + vec3(0,0,1));
+  float n101 = hash31(i + vec3(1,0,1));
+  float n011 = hash31(i + vec3(0,1,1));
+  float n111 = hash31(i + vec3(1,1,1));
+  return mix(
+    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+}
+
+/**
+ * A height field whose character follows the material.
+ *
+ * Fabric is woven, so it gets a fine cross-hatch. Metal is drawn or brushed,
+ * so it gets streaks stretched along one axis. Painted panel is neither, so it
+ * gets an isotropic grain. One extra octave on top carries the finest scale.
+ */
+float microHeight(vec3 p, float rough, float metal) {
+  float woven = step(0.8, rough) * (1.0 - metal);
+  float brushed = metal * (1.0 - step(0.6, rough));
+
+  // Frequencies are chosen so a feature spans several pixels at the distance
+  // a crew member actually inspects a surface from. The first attempt put the
+  // weave at a few millimetres, which is below a pixel at any sensible range:
+  // the derivative of something that fine is enormous and the result was not
+  // fabric, it was glitter.
+  //
+  // Soft cloth undulation, a few centimetres across.
+  float f1 = vnoise(vec3(p.x * 26.0, p.y * 26.0, p.z * 26.0));
+  // Brushed metal: stretched along one axis, tighter across it.
+  float f2 = vnoise(vec3(p.x * 4.0, p.y * 34.0, p.z * 34.0));
+  // Painted panel: an even orange-peel.
+  float f3 = vnoise(p * 13.0);
+
+  float base = mix(f3, f2, brushed);
+  base = mix(base, f1, woven);
+  return base * 0.78 + vnoise(p * 38.0) * 0.22;
+}
+`
+
 const PBR_COMMON = /* glsl */ `
 const float PI = 3.14159265359;
 
@@ -261,6 +335,7 @@ in vec4 vLightPos;
 out vec4 outColor;
 
 ${PBR_COMMON}
+${DETAIL}
 
 // Only the fixtures nearest the eye are sent now, and only so that their
 // specular highlight can move with the viewer. The diffuse half of every
@@ -277,6 +352,7 @@ uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
 uniform int uPcf;      // 1 for a hard edge, 9 for a soft one
 uniform int uMaxLights;
+uniform float uDetailRange;
 uniform vec3 uEarthTint;
 uniform vec3 uCupola;
 
@@ -300,11 +376,50 @@ float sunShadow() {
 void main() {
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;
+
+  // ---- micro-detail, from a single noise evaluation
+  //
+  // Faded out past a few metres: beyond that the features sit below a pixel
+  // and all the noise can do is alias. Fading also means the cost is paid only
+  // where it can be seen, which down a corridor is a small share of the frame.
+  float dist = length(uEye - vPos);
+  float detailFade = uDetailRange <= 0.0
+    ? 0.0
+    : 1.0 - smoothstep(uDetailRange * 0.36, uDetailRange, dist);
+  float microN = 0.5;
+  if (detailFade > 0.01) {
+    microN = microHeight(vPos, vMat.x, vMat.y);
+    // Normal perturbation without a tangent basis, which this mesh does not
+    // carry: take the height's gradient in screen space and push it through
+    // the surface's own derivatives. The hardware has both already.
+    vec3 dpx = dFdx(vPos);
+    vec3 dpy = dFdy(vPos);
+    float dhx = dFdx(microN);
+    float dhy = dFdy(microN);
+    vec3 r1 = cross(dpy, N);
+    vec3 r2 = cross(N, dpx);
+    float det = dot(dpx, r1);
+    if (abs(det) > 1e-12) {
+      vec3 grad = (dhx * r1 + dhy * r2) / det;
+      // Fabric takes the deepest relief, polished metal by far the least.
+      // Metal needs its own reduction beyond what roughness gives: a specular
+      // surface turns a small normal change into a large change in where the
+      // highlight lands, so the same perturbation that reads as orange-peel
+      // on a painted panel reads as crumpled foil on an alloy frame.
+      float relief = mix(0.0022, 0.0105, vMat.x) * (1.0 - 0.8 * vMat.y) * detailFade;
+      N = normalize(N - grad * relief);
+    }
+  }
+
   vec3 V = normalize(uEye - vPos);
   float ndv = max(dot(N, V), 1e-4);
 
-  vec3 albedo = vColor;
-  float rough = clamp(vMat.x, 0.06, 1.0);
+  float micro = (microN - 0.5) * detailFade;
+  // A faint mottle, and a roughness that is not uniform across a whole panel.
+  // Both are deliberately small: the aim is to stop surfaces reading as
+  // painted cardboard, not to make the station look dirty.
+  vec3 albedo = vColor * (1.0 + micro * 0.035);
+  float rough = clamp(vMat.x + micro * 0.075, 0.06, 1.0);
   float metal = clamp(vMat.y, 0.0, 1.0);
   float ao = clamp(vMat.z, 0.0, 1.0);
 
