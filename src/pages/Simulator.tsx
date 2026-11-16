@@ -3,7 +3,7 @@ import { RotateCcw, Sparkles } from 'lucide-react'
 import type { RadiationScenario, ScenarioParams, ScenarioPoint } from '../types'
 import { useMission } from '../hooks/useMission'
 import { SCENARIO_PRESETS } from '../data/scenarios'
-import { DEFAULT_PARAMS, RADIATION_SCENARIOS, SIMULATOR_ASSUMPTIONS, baselineFor, describeScenario, operationalConsiderations, runScenario } from '../lib/simulator'
+import { DEFAULT_PARAMS, MAX_SCENARIO_DAYS, RADIATION_SCENARIOS, SIMULATOR_ASSUMPTIONS, baselineFor, describeScenario, operationalConsiderations, phaseDays, runScenario } from '../lib/simulator'
 import { fmtSigned } from '../lib/format'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card } from '../components/ui/Card'
@@ -20,8 +20,9 @@ const METRICS: { key: Metric; label: string; unit: string; decimals: number; col
   { key: 'sleepQuality', label: 'Sleep quality index', unit: '/100', decimals: 0, color: '#22d3ee', worseWhen: 'lower' },
   { key: 'restingHR', label: 'Resting heart rate', unit: 'bpm', decimals: 1, color: '#f87171', worseWhen: 'higher' },
   { key: 'fatigue', label: 'Fatigue indicator', unit: '/10', decimals: 1, color: '#e879f9', worseWhen: 'higher' },
+  { key: 'sleepDebt', label: 'Sleep debt', unit: 'h', decimals: 0, color: '#818cf8', worseWhen: 'higher' },
   { key: 'radiationCumulative', label: 'Cumulative radiation dose', unit: 'mSv', decimals: 0, color: '#fbbf24', worseWhen: 'higher' },
-  { key: 'readiness', label: 'Readiness index (composite)', unit: '/100', decimals: 0, color: '#3b82f6', worseWhen: 'lower' },
+  { key: 'readiness', label: 'Readiness (same model as Medical Monitor)', unit: '/100', decimals: 0, color: '#3b82f6', worseWhen: 'lower' },
 ]
 
 export function Simulator() {
@@ -81,7 +82,7 @@ export function Simulator() {
           </Card>
           <Card title="Parameters" subtitle={preset ? SCENARIO_PRESETS.find((p) => p.id === preset)?.description : 'Custom scenario'}>
             <div className="space-y-5">
-              <Slider label="Mission duration" value={params.durationDays} min={180} max={1200} step={10} onChange={(v) => update({ durationDays: v })} format={(v) => `${v} days`} hint="Transit/surface split is held at 23% / 56% / 21% of the total." />
+              <Slider label="Mission duration" value={Math.min(MAX_SCENARIO_DAYS, params.durationDays)} min={180} max={MAX_SCENARIO_DAYS} step={10} onChange={(v) => update({ durationDays: v })} format={(v) => `${v} days`} hint="Transit/surface split is held at 23% / 56% / 21% of the total." />
               <Slider label="Sleep disruption" value={params.sleepDisruption} min={0} max={100} step={5} onChange={(v) => update({ sleepDisruption: v })} format={(v) => `${v}%`} hint="0 = protected schedule, 100 = chronic shift work and noise." />
               <Slider label="Exercise frequency" value={params.exerciseSessionsPerWeek} min={0} max={7} step={1} onChange={(v) => update({ exerciseSessionsPerWeek: v })} format={(v) => `${v} / week`} hint="Nominal countermeasure schedule is 6 sessions per week." />
               <Select label="Radiation exposure scenario" value={params.radiationScenario} onChange={(v) => update({ radiationScenario: v as RadiationScenario })} options={(Object.keys(RADIATION_SCENARIOS) as RadiationScenario[]).map((k) => ({ value: k, label: RADIATION_SCENARIOS[k].label }))} />
@@ -137,11 +138,10 @@ export function Simulator() {
                   height={170}
                   showDate={false}
                   xLabel={(v) => `d${v}`}
-                  markers={
-                    mt.key === 'radiationCumulative'
-                      ? [{ day: Math.round(params.durationDays * 0.23), label: 'land', color: 'var(--muted)' }, { day: Math.round(params.durationDays * 0.79), label: 'depart', color: 'var(--muted)' }]
-                      : []
-                  }
+                  markers={[
+                    { day: phaseDays(scenario.params.durationDays).landing, label: 'land', color: 'var(--muted)' },
+                    { day: phaseDays(scenario.params.durationDays).departure, label: 'depart', color: 'var(--muted)' },
+                  ]}
                 />
               </Card>
             ))}
@@ -181,7 +181,7 @@ export function Simulator() {
             </ul>
           </Card>
           <Disclaimer tone="warn">
-            <strong className="text-text-strong">Illustrative scenario model.</strong> These curves are produced by simple response equations whose magnitudes are informed by published research. They are not validated medical predictions, do not represent any real astronaut, and must not be used for real medical or operational decisions.
+            <strong className="text-text-strong">Illustrative scenario model.</strong> These curves come from AURORA’s simulation engine, whose effect sizes are taken from published research where it exists and are marked as assumptions where it does not. They are not validated medical predictions, do not represent any real astronaut, and must not be used for real medical or operational decisions.
           </Disclaimer>
         </div>
       </div>

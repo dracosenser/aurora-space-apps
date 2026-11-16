@@ -165,6 +165,8 @@ export interface ScenarioPoint {
   sleepQuality: number
   restingHR: number
   fatigue: number
+  /** Accumulated sleep debt, hours (30 h ≈ one night without sleep). */
+  sleepDebt: number
   radiationCumulative: number
   readiness: number
 }

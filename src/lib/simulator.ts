@@ -1,13 +1,18 @@
 import type { RadiationScenario, ScenarioParams, ScenarioPoint, ScenarioResult } from '../types'
-import { clamp } from './stats'
+import { simulate } from '../sim/engine'
+import { scoreSeries } from '../sim/assess'
+import { blankMission, newAstronaut, newEvent } from '../sim/library'
+import { SLEEP_MODEL } from '../sim/reference'
+import type { MissionConfig, MissionEvent } from '../sim/types'
 
 /**
  * Mission What-If Simulator.
  *
- * An ILLUSTRATIVE scenario model. The equations below are simple
- * first-order responses whose magnitudes are informed by published
- * spaceflight findings (see docs/METHODOLOGY.md). They are not validated
- * medical predictions and must not be read as such.
+ * Each scenario is turned into a mission and run through the same simulation
+ * engine and readiness model as the Mission Builder and the Medical Monitor, so
+ * a score here means the same thing as a score anywhere else in AURORA. The
+ * mapping from the five sliders to mission inputs is below and in
+ * SIMULATOR_ASSUMPTIONS.
  */
 
 export const DEFAULT_PARAMS: ScenarioParams = {
@@ -18,6 +23,9 @@ export const DEFAULT_PARAMS: ScenarioParams = {
   stressLevel: 4,
 }
 
+/** Longest mission the daily engine runs. */
+export const MAX_SCENARIO_DAYS = 1100
+
 export const RADIATION_SCENARIOS: Record<RadiationScenario, { label: string; blurb: string }> = {
   nominal: { label: 'Nominal (solar maximum)', blurb: 'GCR background near solar-maximum levels, no major solar particle events.' },
   'solar-minimum': { label: 'Solar minimum (+30% GCR)', blurb: 'Weaker heliospheric shielding raises galactic cosmic ray background.' },
@@ -25,86 +33,112 @@ export const RADIATION_SCENARIOS: Record<RadiationScenario, { label: string; blu
   'enhanced-shielding': { label: 'Enhanced shielding (−30%)', blurb: 'Water-wall and regolith shielding reduce effective dose.' },
 }
 
-/** Mission structure as fractions of total duration (transit / surface / transit). */
-function gravityAt(day: number, duration: number): number {
-  const f = day / duration
-  if (f < 0.23) return 0
-  if (f < 0.79) return 0.38
-  return 0
+/** Transit and surface background dose, mSv/day (MSL/RAD: Zeitlin et al. 2013; Hassler et al. 2014). */
+const TRANSIT_MSV = 1.8
+const SURFACE_MSV = 0.48
+const RAD_FACTOR: Record<RadiationScenario, number> = { nominal: 1, 'solar-minimum': 1.3, 'spe-series': 1, 'enhanced-shielding': 0.7 }
+/** A sleep period long enough to cover an 8 h need at 90 % efficiency. */
+const PROTECTED_SLEEP_H = 9
+/** Sleep period lost at 100 % disruption. */
+const MAX_DISRUPTION_H = 3
+/** Minutes per session, so 6 sessions a week is the 60 min/day countermeasure dose. */
+const SESSION_MIN = 70
+const BASE_WORKLOAD = 2
+
+export function phaseDays(durationDays: number): { landing: number; departure: number } {
+  return { landing: Math.round(durationDays * 0.23) + 1, departure: Math.round(durationDays * 0.79) + 1 }
 }
 
-function dailyDose(day: number, params: ScenarioParams): number {
-  const g = gravityAt(day, params.durationDays)
-  let base = g > 0 ? 0.48 : 1.78
-  if (params.radiationScenario === 'solar-minimum') base *= 1.3
-  if (params.radiationScenario === 'enhanced-shielding') base *= 0.7
-  let event = 0
-  if (params.radiationScenario === 'spe-series') {
-    const events: [number, number][] = [
-      [0.15, 10],
-      [0.5, 25],
-      [0.8, 8],
-    ]
-    for (const [frac, dose] of events) {
-      const eventDay = Math.round(frac * params.durationDays)
-      if (day === eventDay) event += dose * 0.65
-      if (day === eventDay + 1) event += dose * 0.35
-    }
+/** The mission a scenario describes: one reference crew member, transit / Mars surface / transit. */
+export function scenarioMission(p: ScenarioParams): MissionConfig {
+  const days = Math.max(30, Math.min(MAX_SCENARIO_DAYS, Math.round(p.durationDays)))
+  const m = blankMission()
+  m.id = 'WHATIF'
+  m.name = 'What-If scenario'
+  m.destination = 'Mars'
+  m.seed = 2026
+  m.durationDays = days
+  m.resolution = 'daily'
+  const f = RAD_FACTOR[p.radiationScenario]
+  m.environment = { ...m.environment, gravityG: 0, radiationMSvPerDay: TRANSIT_MSV * f }
+  const crewStress = 1 + 0.6 * BASE_WORKLOAD
+  m.crew = [
+    newAstronaut(0, {
+      id: 'REF',
+      name: 'Reference crew member',
+      role: 'Reference',
+      schedule: {
+        sleepStartHour: 22,
+        sleepHours: PROTECTED_SLEEP_H - (MAX_DISRUPTION_H * p.sleepDisruption) / 100,
+        workHours: 9,
+        exerciseSessionsPerWeek: p.exerciseSessionsPerWeek,
+        exerciseMinutes: SESSION_MIN,
+        exerciseHour: 16,
+        workload: BASE_WORKLOAD,
+      },
+      baseline: { restingHR: 60, hrv: 60, respRate: 14, spo2: 98, bodyTemp: 36.7, sleepNeed: SLEEP_MODEL.defaultNeedH, sleepRequirement: SLEEP_MODEL.defaultNeedH, activityMinutes: 140, variability: 0.2, systolicBP: 118, diastolicBP: 76 },
+    }),
+  ]
+  const { landing, departure } = phaseDays(days)
+  const fixed = (e: MissionEvent, id: string): MissionEvent => ({ ...e, id })
+  const events: MissionEvent[] = [
+    fixed(newEvent('custom', landing, departure - landing, 'Mars surface stay', { envOverride: { gravityG: 0.38, radiationMSvPerDay: SURFACE_MSV * f }, params: {} }), 'EV-SURFACE'),
+  ]
+  const extraStress = Math.max(0, p.stressLevel - crewStress)
+  if (extraStress > 0) events.push(fixed(newEvent('stress', 1, days, 'Mission stress', { params: { stressIncrease: Math.min(5, extraStress) } }), 'EV-STRESS'))
+  if (p.radiationScenario === 'spe-series') {
+    ;([[0.15, 10], [0.5, 25], [0.8, 8]] as const).forEach(([frac, dose], k) =>
+      events.push(fixed(newEvent('solar-particle-event', Math.max(1, Math.round(frac * days)), 2, `Solar particle event ${k + 1}`, { params: { doseMSv: dose, sleepLossHours: 2, stressIncrease: 1 } }), `EV-SPE-${k}`)),
+    )
   }
-  return base + event
+  m.events = events
+  return m
 }
+
+const cache = new Map<string, ScenarioResult>()
 
 export function runScenario(params: ScenarioParams): ScenarioResult {
+  const key = JSON.stringify(params)
+  const hit = cache.get(key)
+  if (hit) return hit
+  const config = scenarioMission(params)
+  const result = simulate(config)
+  const run = result.astronauts[0]
+  const D = run.daily
+  const readiness = scoreSeries(config, result, run.astronautId)
   const series: ScenarioPoint[] = []
-  const exEff = clamp(params.exerciseSessionsPerWeek / 6, 0, 1.15) * 0.82
-  let muscle = 100
-  let bone = 100
+  const stride = Math.max(1, Math.round(result.days / 300))
   let cumulative = 0
-  let sleepDebt = 0
-
-  for (let day = 1; day <= params.durationDays; day++) {
-    const g = gravityAt(day, params.durationDays)
-
-    // Muscle: first-order approach to an equilibrium that depends on gravity and exercise.
-    const muscleFloor = 100 - 34 * (1 - g) * (1 - exEff)
-    muscle += (muscleFloor - muscle) * 0.012
-
-    // Bone: steady loss rate modulated by gravity and exercise; no in-mission recovery.
-    bone -= 0.04 * (1 - g) * (1 - 0.7 * exEff)
-
-    // Sleep quality: disruption and stress reduce it; accumulated sleep debt erodes it slowly.
-    sleepDebt = sleepDebt * 0.98 + (params.sleepDisruption / 100) * 0.4
-    const sleepQuality = clamp(80 - 0.32 * params.sleepDisruption - 1.4 * (params.stressLevel - 4) - sleepDebt * 0.6 + (g > 0 ? 2 : 0), 25, 95)
-
-    // Resting HR: deconditioning, poor sleep and stress all push it upward.
-    const restingHR = 57 + 0.11 * (100 - muscle) + 0.07 * (80 - sleepQuality) + 0.5 * (params.stressLevel - 4) + (g === 0 ? 1.5 : 0)
-
-    // Fatigue: sleep quality, stress and deconditioning.
-    const fatigue = clamp(3 + 0.045 * (80 - sleepQuality) + 0.3 * (params.stressLevel - 4) + 0.03 * (100 - muscle), 1, 10)
-
-    cumulative += dailyDose(day, params)
-
-    // Readiness: an operational composite (0-100) of the above, for comparison only.
-    // Radiation is excluded: it is a long-term risk, not a day-to-day operational capability.
-    const readiness = clamp(100 - 0.9 * (100 - muscle) - 1.2 * (100 - bone) - 0.45 * (80 - sleepQuality) - 3.5 * (fatigue - 3), 0, 100)
-
-    if (day % Math.max(1, Math.round(params.durationDays / 300)) === 0 || day === params.durationDays || day === 1) {
-      series.push({
-        day,
-        muscleStrength: round1(muscle),
-        boneDensity: round1(bone, 2),
-        sleepQuality: round1(sleepQuality),
-        restingHR: round1(restingHR),
-        fatigue: round1(fatigue),
-        radiationCumulative: round1(cumulative),
-        readiness: round1(readiness),
-      })
-    }
+  // A 7-day mean, so the chart shows the trend the readiness model scores rather than daily noise.
+  const mean7 = (arr: ArrayLike<number>, i: number) => {
+    let s = 0
+    const from = Math.max(0, i - 6)
+    for (let k = from; k <= i; k++) s += arr[k]
+    return s / (i - from + 1)
   }
-  return { params, series, final: series[series.length - 1] }
+  for (let i = 0; i < result.days; i++) {
+    cumulative += D.radiationDose[i]
+    const day = i + 1
+    if (day % stride !== 0 && day !== 1 && day !== result.days) continue
+    series.push({
+      day,
+      muscleStrength: round(mean7(D.muscleStrength, i), 1),
+      boneDensity: round(mean7(D.boneDensity, i), 2),
+      sleepQuality: round(mean7(D.sleepQuality, i), 1),
+      restingHR: round(mean7(D.restingHR, i), 1),
+      fatigue: round(mean7(D.fatigue, i), 1),
+      sleepDebt: round(D.sleepDebt[i], 1),
+      radiationCumulative: round(cumulative, 1),
+      readiness: readiness[i],
+    })
+  }
+  const out = { params: { ...params, durationDays: result.days }, series, final: series[series.length - 1] }
+  if (cache.size > 40) cache.clear()
+  cache.set(key, out)
+  return out
 }
 
-function round1(v: number, d = 1): number {
+function round(v: number, d: number): number {
   const f = Math.pow(10, d)
   return Math.round(v * f) / f
 }
@@ -115,19 +149,24 @@ export function baselineFor(params: ScenarioParams): ScenarioResult {
 
 export function describeScenario(p: ScenarioParams): string[] {
   const out: string[] = []
+  const { landing, departure } = phaseDays(p.durationDays)
   out.push(
-    `A ${p.durationDays}-day mission profile with ${Math.round(p.durationDays * 0.23)} days of outbound transit in microgravity, ${Math.round(p.durationDays * 0.56)} days at Mars gravity (0.38 g) and ${Math.round(p.durationDays * 0.21)} days of return transit.`,
+    `A ${p.durationDays}-day Mars mission for one reference crew member: days 1–${landing - 1} outbound in microgravity, days ${landing}–${departure - 1} on the surface at 0.38 g, days ${departure}–${p.durationDays} returning in microgravity.`,
   )
-  if (p.exerciseSessionsPerWeek >= 6) out.push(`Exercise is at the nominal countermeasure schedule (${p.exerciseSessionsPerWeek} sessions/week), which the model treats as retaining roughly 80% of its protective effect against muscle and bone loss in microgravity.`)
-  else if (p.exerciseSessionsPerWeek >= 3) out.push(`Exercise is reduced to ${p.exerciseSessionsPerWeek} sessions/week. The model scales countermeasure effectiveness linearly, so muscle equilibrium and bone-loss rate both worsen in transit.`)
-  else out.push(`Exercise is severely reduced (${p.exerciseSessionsPerWeek} sessions/week). Deconditioning in microgravity proceeds toward the uncountered equilibrium, which is the model's worst case.`)
-  if (p.sleepDisruption <= 15) out.push('Sleep disruption is mild, consistent with routine schedule shifts.')
-  else if (p.sleepDisruption <= 50) out.push(`Sleep disruption of ${p.sleepDisruption}% represents frequent schedule shifts, noise or shift work; sleep quality and fatigue degrade and the effect compounds slowly through accumulated sleep debt.`)
-  else out.push(`Sleep disruption of ${p.sleepDisruption}% represents chronic sleep loss. Fatigue rises steeply and the modelled readiness index falls throughout the mission.`)
-  out.push(RADIATION_SCENARIOS[p.radiationScenario].blurb + ' Doses are integrated daily into a cumulative mission effective dose.')
-  if (p.stressLevel <= 4) out.push('Mission stress is within the nominal range.')
-  else if (p.stressLevel <= 7) out.push(`Elevated mission stress (${p.stressLevel}/10) modestly raises resting heart rate and fatigue and lowers sleep quality.`)
-  else out.push(`High mission stress (${p.stressLevel}/10) is a strong driver in the model, degrading sleep, fatigue and resting heart rate together.`)
+  const perDay = (p.exerciseSessionsPerWeek * SESSION_MIN) / 7
+  out.push(
+    p.exerciseSessionsPerWeek >= 6
+      ? `Exercise: ${p.exerciseSessionsPerWeek} × ${SESSION_MIN} min a week (${Math.round(perDay)} min/day), at or above the 60 min/day countermeasure dose, so muscle and bone loss are slowed but not stopped in microgravity.`
+      : `Exercise: ${p.exerciseSessionsPerWeek} × ${SESSION_MIN} min a week (${Math.round(perDay)} min/day), ${Math.round((perDay / 60) * 100)} % of the 60 min/day countermeasure dose. Deconditioning in microgravity proceeds faster in proportion.`,
+  )
+  const sleepH = PROTECTED_SLEEP_H - (MAX_DISRUPTION_H * p.sleepDisruption) / 100
+  const slept = sleepH * SLEEP_MODEL.efficiency
+  out.push(
+    `Sleep: ${p.sleepDisruption} % disruption leaves a ${sleepH.toFixed(2)} h sleep period, about ${slept.toFixed(1)} h of sleep against an ${SLEEP_MODEL.defaultNeedH} h need. ${slept < SLEEP_MODEL.defaultNeedH - 0.05 ? `The ${(SLEEP_MODEL.defaultNeedH - slept).toFixed(1)} h nightly shortfall accumulates as sleep debt (Van Dongen 2003), which drives reaction-time lapses, fatigue, heart rate and mood.` : 'That covers the need, so no sleep debt builds.'}`,
+  )
+  out.push(RADIATION_SCENARIOS[p.radiationScenario].blurb + ` Background ${(TRANSIT_MSV * RAD_FACTOR[p.radiationScenario]).toFixed(2)} mSv/day in transit and ${(SURFACE_MSV * RAD_FACTOR[p.radiationScenario]).toFixed(2)} mSv/day on the surface.`)
+  const crewStress = 1 + 0.6 * BASE_WORKLOAD
+  out.push(p.stressLevel <= crewStress ? `Stress ${p.stressLevel}/10 is within what a routine workload produces in the model.` : `Stress ${p.stressLevel}/10 adds ${Math.min(5, p.stressLevel - crewStress).toFixed(1)} points to the model's stress for the whole mission, which raises heart rate and fatigue and lowers sleep quality and mood.`)
   return out
 }
 
@@ -137,21 +176,22 @@ export function operationalConsiderations(result: ScenarioResult, baseline: Scen
   const b = baseline.final
   if (f.radiationCumulative >= 600) out.push(`Projected cumulative dose (${f.radiationCumulative.toFixed(0)} mSv) exceeds the 600 mSv career effective-dose limit in NASA-STD-3001. Shielding, mission duration or transit timing would need to change.`)
   else if (f.radiationCumulative >= 450) out.push(`Projected cumulative dose (${f.radiationCumulative.toFixed(0)} mSv) consumes most of the 600 mSv career limit in NASA-STD-3001, limiting future flight assignments.`)
+  if (f.sleepDebt >= 15) out.push(`Sleep debt ends at ${f.sleepDebt.toFixed(0)} h, about ${(f.sleepDebt / SLEEP_MODEL.nightEquivalentH).toFixed(1)} nights without sleep in performance terms. Protect the sleep period before anything else: debt keeps building as long as the nightly shortfall does.`)
   if (f.muscleStrength < 85) out.push(`Muscle strength index falls below 85% of pre-flight, which would challenge EVA workload and emergency egress capability on landing.`)
   if (f.boneDensity < 94) out.push(`Bone indicator falls to ${f.boneDensity.toFixed(1)}% of pre-flight; recovery after return is slow and fracture-risk review would be warranted.`)
   if (f.fatigue >= 6) out.push(`Sustained fatigue above 6/10 would argue for schedule protection, task re-sequencing and sleep countermeasures.`)
-  if (f.sleepQuality < 60) out.push(`Low sleep quality for extended periods raises operational error risk; consider lighting, scheduling and workload interventions.`)
-  if (f.readiness < b.readiness - 10) out.push(`Readiness index ends ${(b.readiness - f.readiness).toFixed(0)} points below baseline; the mission plan would carry reduced margin for contingency operations.`)
+  if (f.readiness < 65) out.push(`Readiness ends at ${f.readiness.toFixed(0)}/100, in caution. The Medical Monitor would flag this crew member for attention.`)
+  if (f.readiness < b.readiness - 10) out.push(`Readiness ends ${(b.readiness - f.readiness).toFixed(0)} points below the baseline plan; the mission would carry reduced margin for contingency operations.`)
   if (out.length === 0) out.push('No modelled indicator crosses an operational threshold. Margins are similar to the baseline scenario.')
   return out
 }
 
 export const SIMULATOR_ASSUMPTIONS: string[] = [
-  'Muscle strength follows a first-order approach to an equilibrium set by gravity and exercise effectiveness; magnitudes are informed by ISS countermeasure outcomes.',
-  'Bone indicator declines at a constant daily rate in reduced gravity (order 0.3-1.5% per month depending on exercise), with no in-mission recovery.',
-  'Radiation uses MSL/RAD-informed background rates (≈1.8 mSv/day in transit, ≈0.5 mSv/day in a shielded surface habitat) and discrete SPE doses.',
-  'Sleep quality, fatigue and resting heart rate respond linearly to sleep disruption and stress, plus a slow accumulated sleep-debt term.',
-  'The readiness index is an operational composite created for comparison between scenarios; it has no clinical meaning.',
-  'Individual variability, countermeasure pharmacology, nutrition, illness, and crew interactions are not modelled.',
-  'All outputs are illustrative. They are not validated medical predictions and must not inform real medical decisions.',
+  'Each scenario is run through the same engine and readiness model as the Mission Builder and Medical Monitor, for one reference crew member with steady day-to-day variation.',
+  `Sleep disruption shortens the sleep period from ${PROTECTED_SLEEP_H} h (enough for an 8 h need) by up to ${MAX_DISRUPTION_H} h. Shortfalls accumulate as sleep debt with a ${SLEEP_MODEL.decayDays}-day recovery time constant (Van Dongen et al., 2003).`,
+  `Exercise sessions are ${SESSION_MIN} min, so 6 a week is the 60 min/day dose the model treats as full protection. Muscle and bone follow the engine's deconditioning model; bone does not recover in flight.`,
+  'Radiation uses MSL/RAD-informed background rates (≈1.8 mSv/day in transit, ≈0.5 mSv/day in a shielded surface habitat) and discrete SPE doses with time in the storm shelter.',
+  'Stress above what a routine workload produces is added for the whole mission; it raises heart rate and fatigue and lowers sleep quality and mood.',
+  'Readiness is AURORA’s operational score (sleep and alertness, behavioral health, muscle and bone, cardiopulmonary, exposure), including radiation against the 600 mSv career limit. It is not a clinical instrument.',
+  'Individual variability, countermeasure pharmacology, nutrition, illness, and crew interactions are not modelled. Outputs are illustrative and must not inform real medical decisions.',
 ]
