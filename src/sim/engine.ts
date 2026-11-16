@@ -62,6 +62,10 @@ export const REFERENCE_SPO2 = modelSpO2(NOMINAL_ENVIRONMENT.ppO2KPa, 101.3)
 
 export interface ValidationIssue {
   level: 'error' | 'warning'
+  /** Which part of the configuration to change to fix it. */
+  area: 'mission' | 'crew' | 'environment' | 'events'
+  /** The astronaut or event concerned, when there is one. */
+  targetId?: string
   message: string
 }
 
@@ -72,41 +76,51 @@ export function participants(config: MissionConfig): AstronautProfile[] {
 export function validateConfig(config: MissionConfig): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   const maxDays = config.resolution === 'hourly' ? LIMITS.maxDaysHourly : LIMITS.maxDaysDaily
-  if (!Number.isInteger(config.durationDays) || config.durationDays < 1) issues.push({ level: 'error', message: 'Mission duration must be at least 1 day.' })
+  if (!Number.isInteger(config.durationDays) || config.durationDays < 1) issues.push({ level: 'error', area: 'mission', message: `Mission duration is ${config.durationDays} days. Set it to at least 1 day.` })
   if (config.durationDays > maxDays)
-    issues.push({ level: 'error', message: `${config.resolution === 'hourly' ? 'Hourly' : 'Daily'} simulation supports up to ${maxDays} days. ${config.resolution === 'hourly' ? 'Switch to daily resolution for longer missions.' : 'Split the mission into stages.'}` })
+    issues.push({ level: 'error', area: 'mission', message: `Mission duration is ${config.durationDays} days, but ${config.resolution} simulation supports up to ${maxDays}. ${config.resolution === 'hourly' ? 'Shorten the mission or switch Time resolution to Daily.' : `Shorten the mission to ${maxDays} days or fewer.`}` })
   const crew = participants(config)
-  if (crew.length === 0) issues.push({ level: 'error', message: 'At least one astronaut must take part in the mission.' })
-  if (crew.length > LIMITS.maxCrew) issues.push({ level: 'error', message: `Up to ${LIMITS.maxCrew} participating astronauts are supported in one simulation, to keep it responsive in the browser.` })
+  if (crew.length === 0) issues.push({ level: 'error', area: 'crew', message: config.crew.length === 0 ? 'The crew is empty. Add at least one astronaut.' : 'No astronaut is set to take part. Tick “Takes part” for at least one crew member.' })
+  if (crew.length > LIMITS.maxCrew) issues.push({ level: 'error', area: 'crew', message: `${crew.length} astronauts are set to take part; one simulation supports up to ${LIMITS.maxCrew}. Untick “Takes part” for ${crew.length - LIMITS.maxCrew} of them.` })
   const ids = new Set<string>()
   for (const a of config.crew) {
-    if (ids.has(a.id)) issues.push({ level: 'error', message: `Two crew members share the id ${a.id}.` })
+    if (ids.has(a.id)) issues.push({ level: 'error', area: 'crew', targetId: a.id, message: `Two crew members share the id ${a.id}. Remove one and duplicate the other instead.` })
     ids.add(a.id)
     const b = a.baseline
-    const checks: [boolean, string][] = [
-      [b.restingHR >= 30 && b.restingHR <= 120, 'resting heart rate 30–120 bpm'],
-      [b.hrv >= 5 && b.hrv <= 200, 'HRV 5–200 ms'],
-      [b.respRate >= 6 && b.respRate <= 30, 'respiratory rate 6–30 /min'],
-      [b.spo2 >= 80 && b.spo2 <= 100, 'SpO₂ 80–100 %'],
-      [b.bodyTemp >= 34 && b.bodyTemp <= 39, 'body temperature 34–39 °C'],
-      [b.sleepNeed >= 3 && b.sleepNeed <= 12, 'typical sleep 3–12 h'],
-      [b.variability >= 0.2 && b.variability <= 3, 'variability 0.2–3'],
-      [a.schedule.sleepHours >= 2 && a.schedule.sleepHours <= 14, 'scheduled sleep 2–14 h'],
-      [a.schedule.workload >= 1 && a.schedule.workload <= 5, 'workload 1–5'],
+    const who = a.name.trim() || a.id
+    const checks: [number, number, number, string, string][] = [
+      [b.restingHR, 30, 120, 'Resting HR', 'bpm'],
+      [b.hrv, 5, 200, 'HRV', 'ms'],
+      [b.respRate, 6, 30, 'Resp. rate', '/min'],
+      [b.spo2, 80, 100, 'SpO₂', '%'],
+      [b.bodyTemp, 34, 39, 'Body temp', '°C'],
+      [b.sleepNeed, 3, 12, 'Typical sleep', 'h'],
+      [b.variability, 0.2, 3, 'Variation', '×'],
+      [b.systolicBP ?? 118, 70, 200, 'Systolic BP', 'mmHg'],
+      [b.diastolicBP ?? 76, 40, 130, 'Diastolic BP', 'mmHg'],
+      [a.schedule.sleepHours, 2, 14, 'Sleep period', 'h'],
+      [a.schedule.workload, 1, 5, 'Workload', ''],
+      [a.schedule.sleepStartHour, 0, 23, 'Sleep starts (hour)', ''],
+      [a.schedule.exerciseSessionsPerWeek, 0, 14, 'Exercise sessions/week', ''],
+      [a.schedule.exerciseMinutes, 0, 180, 'Minutes per session', 'min'],
     ]
-    for (const [ok, what] of checks) if (!ok) issues.push({ level: 'error', message: `${a.name || a.id}: ${what} expected.` })
+    for (const [v, lo, hi, label, unit] of checks) {
+      if (!Number.isFinite(v) || v < lo || v > hi)
+        issues.push({ level: 'error', area: 'crew', targetId: a.id, message: `${who}: ${label} is ${Number.isFinite(v) ? `${v}${unit ? ` ${unit}` : ''}` : 'empty'}. Set it between ${lo} and ${hi}${unit ? ` ${unit}` : ''}.` })
+    }
+    if (!a.name.trim()) issues.push({ level: 'warning', area: 'crew', targetId: a.id, message: `Crew member ${a.id} has no name.` })
   }
   for (const p of ENV_PARAMS) {
     const v = config.environment[p.key]
-    if (!Number.isFinite(v) || v < p.min || v > p.max) issues.push({ level: 'error', message: `${p.label} must be between ${p.min} and ${p.max} ${p.unit}.` })
+    if (!Number.isFinite(v) || v < p.min || v > p.max) issues.push({ level: 'error', area: 'environment', message: `${p.label} is ${Number.isFinite(v) ? `${v} ${p.unit}` : 'empty'}. Set it between ${p.min} and ${p.max} ${p.unit}.` })
   }
-  if (config.environment.ppO2KPa > config.environment.pressureKPa) issues.push({ level: 'error', message: 'Oxygen partial pressure cannot exceed total pressure.' })
+  if (config.environment.ppO2KPa > config.environment.pressureKPa) issues.push({ level: 'error', area: 'environment', message: `Oxygen partial pressure (${config.environment.ppO2KPa} kPa) is higher than cabin pressure (${config.environment.pressureKPa} kPa). Lower the oxygen or raise the pressure.` })
   for (const e of config.events) {
-    if (e.startDay > config.durationDays) issues.push({ level: 'warning', message: `"${e.title}" starts after the mission ends and will have no effect.` })
-    else if (e.startDay + e.durationDays - 1 > config.durationDays) issues.push({ level: 'warning', message: `"${e.title}" runs past the end of the mission and is cut off on day ${config.durationDays}.` })
-    if (!e.crewWide && !e.astronautIds.some((id) => crew.some((c) => c.id === id))) issues.push({ level: 'warning', message: `"${e.title}" affects no participating astronaut.` })
+    if (e.startDay > config.durationDays) issues.push({ level: 'warning', area: 'events', targetId: e.id, message: `"${e.title}" starts on day ${e.startDay}, after the mission ends on day ${config.durationDays}, so it will have no effect. Move its start day earlier.` })
+    else if (e.startDay + e.durationDays - 1 > config.durationDays) issues.push({ level: 'warning', area: 'events', targetId: e.id, message: `"${e.title}" runs past the end of the mission and is cut off on day ${config.durationDays}.` })
+    if (!e.crewWide && !e.astronautIds.some((id) => crew.some((c) => c.id === id))) issues.push({ level: 'warning', area: 'events', targetId: e.id, message: `"${e.title}" affects no participating astronaut. Tick "Entire crew" or choose who it affects.` })
   }
-  if (config.durationDays < LIMITS.minDaysForDetection) issues.push({ level: 'warning', message: `Missions shorter than ${LIMITS.minDaysForDetection} days are simulated, but anomaly detection needs about three weeks of data to build personal baselines.` })
+  if (config.durationDays < LIMITS.minDaysForDetection) issues.push({ level: 'warning', area: 'mission', message: `Missions shorter than ${LIMITS.minDaysForDetection} days are simulated, but anomaly detection needs about three weeks of data to build personal baselines.` })
   return issues
 }
 

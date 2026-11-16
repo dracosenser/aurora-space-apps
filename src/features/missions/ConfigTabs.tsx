@@ -1,14 +1,49 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Copy, Plus, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '../../components/ui/Button'
 import { Badge } from '../../components/ui/Badge'
 import { Checkbox } from '../../components/ui/Controls'
-import { LIMITS } from '../../sim/engine'
+import { LIMITS, type ValidationIssue } from '../../sim/engine'
 import { EVENT_TYPES, EVENT_TYPE_BY_ID } from '../../sim/events'
 import { duplicateAstronaut, newAstronaut, newEvent } from '../../sim/library'
 import { ENV_BY_KEY, ENV_PARAMS, NOMINAL_ENVIRONMENT, outOfRange } from '../../sim/reference'
 import type { AstronautProfile, EnvKey, EventType, MissionConfig, MissionEvent } from '../../sim/types'
 import { Field, INPUT, Panel } from '../workbench/shared'
+
+/** A request from the problem list to open one astronaut or event. `n` changes on every click. */
+export type Focus = { id?: string; n: number } | null
+
+/** Open the focused item and scroll it into view. */
+function useFocus(focus: Focus, setOpenId: (id: string) => void, prefix: string) {
+  useEffect(() => {
+    if (!focus?.id) return
+    setOpenId(focus.id)
+    const id = `${prefix}-${focus.id}`
+    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [focus?.n])
+}
+
+/** The problems for one astronaut or event, shown inside its card. */
+function ItemIssues({ issues }: { issues: ValidationIssue[] }) {
+  if (!issues.length) return null
+  return (
+    <ul className="space-y-1 border-t border-border px-4 py-2.5 text-xs">
+      {issues.map((i, k) => (
+        <li key={k} className={i.level === 'error' ? 'text-danger' : 'text-warn'}>
+          {i.level === 'error' ? 'Fix: ' : 'Note: '}
+          {i.message}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function IssueBadge({ issues }: { issues: ValidationIssue[] }) {
+  const n = issues.filter((i) => i.level === 'error').length
+  if (n) return <Badge tone="danger">{n} to fix</Badge>
+  if (issues.length) return <Badge tone="warn">{issues.length} note{issues.length > 1 ? 's' : ''}</Badge>
+  return null
+}
 
 export type Edit = (fn: (m: MissionConfig) => MissionConfig) => void
 
@@ -89,8 +124,9 @@ export function MissionTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
 
 // --------------------------------------------------------------------- crew
 
-export function CrewTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
-  const [openId, setOpenId] = useState<string | null>(m.crew[0]?.id ?? null)
+export function CrewTab({ m, edit, issues = [], focus = null }: { m: MissionConfig; edit: Edit; issues?: ValidationIssue[]; focus?: Focus }) {
+  const [openId, setOpenId] = useState<string | null>(focus?.id ?? m.crew[0]?.id ?? null)
+  useFocus(focus, setOpenId, 'crew')
   const updateA = (id: string, fn: (a: AstronautProfile) => AstronautProfile) => edit((x) => ({ ...x, crew: x.crew.map((a) => (a.id === id ? fn(a) : a)) }))
   const flying = m.crew.filter((c) => c.participates).length
   return (
@@ -114,8 +150,9 @@ export function CrewTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
       </div>
       {m.crew.map((a) => {
         const open = openId === a.id
+        const mine = issues.filter((i) => i.targetId === a.id)
         return (
-          <section key={a.id} className="panel">
+          <section key={a.id} id={`crew-${a.id}`} className={`panel scroll-mt-4 ${mine.some((i) => i.level === 'error') ? 'border-danger/60' : ''}`}>
             <div className="flex flex-wrap items-center gap-3 px-4 py-3">
               <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: a.color }} />
               <button className="min-w-0 flex-1 text-left" onClick={() => setOpenId(open ? null : a.id)}>
@@ -126,6 +163,7 @@ export function CrewTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
                 </span>
                 <span className="annotate ml-2">{a.id}</span>
               </button>
+              <IssueBadge issues={mine} />
               <Checkbox checked={a.participates} onChange={(v) => updateA(a.id, (x) => ({ ...x, participates: v }))} label={<span className="text-xs">Takes part</span>} />
               <button className="p-1.5 text-muted hover:text-text-strong" title="Duplicate" aria-label={`Duplicate ${a.name}`} onClick={() => edit((x) => ({ ...x, crew: [...x.crew, duplicateAstronaut(a, x.crew.length)] }))}>
                 <Copy className="h-4 w-4" />
@@ -142,6 +180,7 @@ export function CrewTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
+            <ItemIssues issues={mine} />
             {open && <AstronautEditor a={a} update={(fn) => updateA(a.id, fn)} />}
           </section>
         )
@@ -280,9 +319,10 @@ const MODEL_USE: Record<EnvKey, string> = {
 
 // ------------------------------------------------------------------- events
 
-export function EventsTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
+export function EventsTab({ m, edit, issues = [], focus = null }: { m: MissionConfig; edit: Edit; issues?: ValidationIssue[]; focus?: Focus }) {
   const [type, setType] = useState<EventType>('workload')
-  const [openId, setOpenId] = useState<string | null>(null)
+  const [openId, setOpenId] = useState<string | null>(focus?.id ?? null)
+  useFocus(focus, setOpenId, 'event')
   const updateE = (id: string, fn: (e: MissionEvent) => MissionEvent) => edit((x) => ({ ...x, events: x.events.map((e) => (e.id === id ? fn(e) : e)) }))
   const sorted = [...m.events].sort((a, b) => a.startDay - b.startDay)
   return (
@@ -328,8 +368,9 @@ export function EventsTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
         {sorted.map((e) => {
           const def = EVENT_TYPE_BY_ID[e.type]
           const open = openId === e.id
+          const mine = issues.filter((i) => i.targetId === e.id)
           return (
-            <section key={e.id} className="panel">
+            <section key={e.id} id={`event-${e.id}`} className="panel scroll-mt-4">
               <div className="flex flex-wrap items-center gap-3 px-3.5 py-2.5">
                 <button className="min-w-0 flex-1 text-left" onClick={() => setOpenId(open ? null : e.id)}>
                   <span className="text-sm text-text-strong">{e.title}</span>
@@ -338,10 +379,12 @@ export function EventsTab({ m, edit }: { m: MissionConfig; edit: Edit }) {
                     {e.durationDays > 1 ? `–${e.startDay + e.durationDays - 1}` : ''} · {e.crewWide ? 'WHOLE CREW' : `${e.astronautIds.length} ASTRONAUT${e.astronautIds.length === 1 ? '' : 'S'}`}
                   </span>
                 </button>
+                <IssueBadge issues={mine} />
                 <button className="p-1.5 text-muted hover:text-danger" aria-label={`Remove ${e.title}`} onClick={() => edit((x) => ({ ...x, events: x.events.filter((y) => y.id !== e.id) }))}>
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
+              <ItemIssues issues={mine} />
               {open && (
                 <div className="grid gap-3 border-t border-border p-3.5 sm:grid-cols-2">
                   <Field label="Title"><input className={INPUT} value={e.title} onChange={(ev) => updateE(e.id, (x) => ({ ...x, title: ev.target.value }))} /></Field>

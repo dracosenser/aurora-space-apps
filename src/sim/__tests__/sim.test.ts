@@ -30,9 +30,11 @@ describe('crew size and identity', () => {
   })
 
   it('rejects an empty or oversized crew with an explanation', () => {
-    expect(validateConfig(mission({ crew: [] }))[0].message).toMatch(/At least one astronaut/)
+    const empty = validateConfig(mission({ crew: [] }))[0]
+    expect(empty.message).toMatch(/crew is empty. Add at least one astronaut/)
+    expect(empty.area).toBe('crew')
     const big = Array.from({ length: LIMITS.maxCrew + 1 }, (_, i) => newAstronaut(i))
-    expect(validateConfig(mission({ crew: big })).some((i) => i.level === 'error' && /Up to 30/.test(i.message))).toBe(true)
+    expect(validateConfig(mission({ crew: big })).some((i) => i.level === 'error' && i.area === 'crew' && /up to 30. Untick/.test(i.message))).toBe(true)
     expect(() => simulate(mission({ crew: [] }))).toThrow()
   })
 
@@ -106,9 +108,22 @@ describe('duration and resolution', () => {
 
   it('enforces resolution limits gracefully', () => {
     const hourlyLong = validateConfig(mission({ durationDays: LIMITS.maxDaysHourly + 1, resolution: 'hourly' }))
-    expect(hourlyLong.some((i) => i.level === 'error' && /daily resolution/.test(i.message))).toBe(true)
+    expect(hourlyLong.some((i) => i.level === 'error' && i.area === 'mission' && /switch Time resolution to Daily/.test(i.message))).toBe(true)
     expect(validateConfig(mission({ durationDays: LIMITS.maxDaysDaily + 1 })).some((i) => i.level === 'error')).toBe(true)
     expect(validateConfig(mission({ durationDays: 10 })).some((i) => i.level === 'warning' && /three weeks/.test(i.message))).toBe(true)
+  })
+
+  it('says which value is wrong, what it is, and the allowed range', () => {
+    const m = mission()
+    m.crew[0].baseline.restingHR = 200
+    m.environment.co2mmHg = 99
+    const issues = validateConfig(m)
+    const hr = issues.find((i) => /Resting HR/.test(i.message))!
+    expect(hr.area).toBe('crew')
+    expect(hr.targetId).toBe(m.crew[0].id)
+    expect(hr.message).toMatch(/is 200 bpm. Set it between 30 and 120 bpm/)
+    const co2 = issues.find((i) => i.area === 'environment')!
+    expect(co2.message).toMatch(/is 99 .*Set it between/)
   })
 
   it('runs a long mission with a large crew quickly', () => {

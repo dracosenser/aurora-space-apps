@@ -4,10 +4,10 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { CompareView } from '../features/missions/Compare'
-import { CrewTab, EnvironmentTab, EventsTab, MissionTab, type Edit } from '../features/missions/ConfigTabs'
+import { CrewTab, EnvironmentTab, EventsTab, MissionTab, type Edit, type Focus } from '../features/missions/ConfigTabs'
 import { ResultsView } from '../features/missions/Results'
 import { Panel } from '../features/workbench/shared'
-import { fingerprint, participants, validateConfig } from '../sim/engine'
+import { fingerprint, participants, validateConfig, type ValidationIssue } from '../sim/engine'
 import { blankMission, duplicateMission, isMission, missionLibrary, scenarioCopy, useMissionLibrary } from '../sim/library'
 import { ENV_PARAMS, outOfRange } from '../sim/reference'
 import { runMission } from '../sim/runtime'
@@ -65,6 +65,12 @@ export function MissionBuilder() {
   const edit: Edit = (fn) => setDraft((d) => (d ? fn(d) : d))
   const issues = useMemo(() => (draft ? validateConfig(draft) : []), [draft])
   const errors = issues.filter((i) => i.level === 'error')
+  const [focus, setFocus] = useState<Focus>(null)
+  /** Open the tab where a problem is fixed, and the astronaut or event it concerns. */
+  const goFix = (i: ValidationIssue) => {
+    setTab(i.area)
+    setFocus((f) => ({ id: i.targetId, n: (f?.n ?? 0) + 1 }))
+  }
   const key = draft ? fingerprint(draft) : ''
   const launchedKey = fingerprint(launched)
   const isLaunched = !!draft && launched.id === draft.id && launchedKey === key
@@ -92,7 +98,7 @@ export function MissionBuilder() {
         description="Start here. Build a mission of any length with your own crew, spacecraft conditions and events, then run it. The run launches the mission across AURORA: Mission Control, Signal Veil, the Medical Monitor, analytics and the Flight Deck all switch to it."
         actions={
           draft ? (
-            <Button variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
+            <Button variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} title={errors.length ? errors.map((e) => e.message).join('\n') : undefined} onClick={doRun}>
               Run and launch
             </Button>
           ) : undefined
@@ -107,9 +113,11 @@ export function MissionBuilder() {
           </span>
           {draft.scenarioOf && <Badge tone="accent">scenario of {lib.missions.find((m) => m.id === draft.scenarioOf)?.name ?? 'another mission'}</Badge>}
           {isLaunched ? <Badge tone="ok">launched · drives every page</Badge> : launched.id === draft.id ? <Badge tone="warn">edited since launch · run to update</Badge> : <Badge>not launched</Badge>}
-          <span className="ml-auto text-muted">{errors.length ? <span className="text-danger">{errors.length} problem(s) to fix before running</span> : 'Saved automatically in this browser'}</span>
+          <span className="ml-auto text-muted">{errors.length ? <span className="text-danger">Fix {errors.length === 1 ? 'this problem' : `these ${errors.length} problems`} before running ↓</span> : 'Saved automatically in this browser'}</span>
         </div>
       )}
+
+      {draft && errors.length > 0 && <IssueList issues={errors} title="Can't run yet" onGo={goFix} />}
 
       <div className="mb-5 flex flex-wrap border-b border-border" role="tablist">
         {TABS.map((t) => (
@@ -189,10 +197,13 @@ export function MissionBuilder() {
         </div>
       )}
 
+      {draft && ['mission', 'crew', 'environment', 'events'].includes(tab) && issues.some((i) => i.level === 'warning' && i.area === tab) && (
+        <IssueList issues={issues.filter((i) => i.level === 'warning' && i.area === tab)} title="Worth checking on this tab" />
+      )}
       {draft && tab === 'mission' && <MissionTab m={draft} edit={edit} />}
-      {draft && tab === 'crew' && <CrewTab m={draft} edit={edit} />}
+      {draft && tab === 'crew' && <CrewTab m={draft} edit={edit} issues={issues} focus={focus} />}
       {draft && tab === 'environment' && <EnvironmentTab m={draft} edit={edit} />}
-      {draft && tab === 'events' && <EventsTab m={draft} edit={edit} />}
+      {draft && tab === 'events' && <EventsTab m={draft} edit={edit} issues={issues} focus={focus} />}
 
       {draft && tab === 'review' && (
         <div className="grid gap-4 lg:grid-cols-12">
@@ -231,14 +242,19 @@ export function MissionBuilder() {
             {issues.length === 0 ? <p className="text-xs text-ok">Ready to run.</p> : null}
             <ul className="space-y-1.5 text-xs">
               {issues.map((i, k) => (
-                <li key={k} className={i.level === 'error' ? 'text-danger' : 'text-warn'}>
-                  {i.level === 'error' ? 'Fix: ' : 'Note: '}
-                  {i.message}
+                <li key={k} className={`flex items-start gap-2 ${i.level === 'error' ? 'text-danger' : 'text-warn'}`}>
+                  <span className="min-w-0 flex-1">
+                    {i.level === 'error' ? 'Fix: ' : 'Note: '}
+                    {i.message}
+                  </span>
+                  <button className="shrink-0 underline underline-offset-2 hover:text-text-strong" onClick={() => goFix(i)}>
+                    {AREA_LABEL[i.area]} →
+                  </button>
                 </li>
               ))}
             </ul>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
+              <Button variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} title={errors.length ? errors.map((e) => e.message).join('\n') : undefined} onClick={doRun}>
                 Run and launch
               </Button>
               <Button
@@ -286,13 +302,42 @@ export function MissionBuilder() {
           <div className="border border-border p-6 text-center">
             <p className="text-sm text-text-strong">{launched.id === draft.id ? 'The configuration changed since this mission was launched.' : 'This mission has not been launched yet.'}</p>
             <p className="mt-1 text-xs text-muted">Running it launches it: Mission Control, Signal Veil, the Medical Monitor and every other page switch to it.</p>
-            <Button className="mt-3" variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
+            <Button className="mt-3" variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} title={errors.length ? errors.map((e) => e.message).join('\n') : undefined} onClick={doRun}>
               Run and launch
             </Button>
           </div>
         ))}
 
       {draft && tab === 'compare' && <CompareView activeId={draft.id} onEditB={(id) => open(id, 'environment')} />}
+    </div>
+  )
+}
+
+const AREA_LABEL: Record<ValidationIssue['area'], string> = {
+  mission: 'Mission',
+  crew: 'Crew',
+  environment: 'Spacecraft conditions',
+  events: 'Events',
+}
+
+/** Each problem in plain words, with a button that opens the tab where it is fixed. */
+function IssueList({ issues, title, onGo }: { issues: ValidationIssue[]; title: string; onGo?: (issue: ValidationIssue) => void }) {
+  const isError = issues.some((i) => i.level === 'error')
+  return (
+    <div className={`mb-4 border px-4 py-3 ${isError ? 'border-danger/50' : 'border-warn/50'}`} role={isError ? 'alert' : 'status'}>
+      <p className={`eyebrow ${isError ? 'text-danger' : 'text-warn'}`}>{title}</p>
+      <ul className="mt-2 space-y-1.5 text-xs">
+        {issues.map((i, k) => (
+          <li key={k} className="flex flex-wrap items-start gap-x-3 gap-y-1">
+            <span className="min-w-0 flex-1 text-text">{i.message}</span>
+            {onGo && (
+              <button className={`shrink-0 border px-2 py-0.5 text-[10px] uppercase tracking-wider hover:text-text-strong ${isError ? 'border-danger/50 text-danger' : 'border-warn/50 text-warn'}`} onClick={() => onGo(i)}>
+                Fix in {AREA_LABEL[i.area]}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
