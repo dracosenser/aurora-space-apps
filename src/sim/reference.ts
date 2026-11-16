@@ -128,8 +128,39 @@ export const SIM_INDICATORS: SimIndicatorDef[] = [
   { id: 'muscleStrength', label: 'Muscle strength index', shortLabel: 'Strength', unit: '% pre-flight', decimals: 1, category: 'activity', kind: 'estimate', plausible: [30, 130], resolution: 0.1 },
   { id: 'boneDensity', label: 'Bone health indicator', shortLabel: 'Bone', unit: '% pre-flight', decimals: 2, category: 'activity', kind: 'estimate', plausible: [70, 105], resolution: 0.01 },
   { id: 'mood', label: 'Mood index', shortLabel: 'Mood', unit: '/10', decimals: 1, category: 'behavioral', kind: 'estimate', plausible: [0, 10], resolution: 0.1 },
+  { id: 'sleepDebt', label: 'Accumulated sleep debt', shortLabel: 'Sleep debt', unit: 'h', decimals: 1, category: 'sleep', kind: 'estimate', plausible: [0, 120], resolution: 0.1 },
+  { id: 'pvtLapses', label: 'Reaction-test lapses (PVT)', shortLabel: 'PVT lapses', unit: '/test', decimals: 1, category: 'behavioral', kind: 'estimate', plausible: [0, 40], resolution: 0.1 },
   { id: 'sleepConsistency', label: 'Sleep consistency', shortLabel: 'Consistency', unit: '/100', decimals: 0, category: 'sleep', kind: 'estimate', plausible: [0, 100], resolution: 1 },
 ]
+
+/**
+ * Sleep model constants, each tied to a published finding.
+ *
+ * Van Dongen et al. (Sleep, 2003) restricted sleep to 4, 6 or 8 h for 14 days.
+ * Performance lapses rose roughly linearly with the cumulative hours of sleep
+ * lost and did not level off; 14 days at 6 h impaired performance about as
+ * much as one night without sleep, 14 days at 4 h about as much as two. Their
+ * fitted sleep need was 8.16 h. Belenky et al. (J Sleep Res, 2003) found that
+ * three recovery nights did not fully restore performance after restriction.
+ */
+export const SLEEP_MODEL = {
+  /** Default physiological need, h. Adults need 7–9 h (AASM/SRS consensus, Watson et al., Sleep, 2015). */
+  defaultNeedH: 8,
+  needRange: [7, 9] as [number, number],
+  /** Fraction of the sleep period actually spent asleep. ISS crews slept about 6 h of an 8.5 h period (Barger et al., Lancet Neurol, 2014). */
+  efficiency: 0.9,
+  /** Hours of cumulative debt that impair performance about as much as one night without sleep (Van Dongen 2003). */
+  nightEquivalentH: 30,
+  /** Debt decays with this time constant, days (partial adaptation and recovery; an assumption). */
+  decayDays: 21,
+  /** Extra sleep a person takes when in debt, per hour of debt, and at most (an assumption). */
+  catchUpPerHour: 0.1,
+  catchUpMaxH: 2,
+  maxDebtH: 90,
+  /** PVT lapses per 10-minute test: well rested ≈ 2; ≈ 8.5 after one night-equivalent of debt; ≈ 15 after two (Van Dongen 2003, figure 2). */
+  pvtRested: 2,
+  pvtPerNight: 6.5,
+}
 
 export const SIM_INDICATOR_BY_ID = Object.fromEntries(SIM_INDICATORS.map((d) => [d.id, d])) as Record<SimIndicator, SimIndicatorDef>
 
@@ -159,9 +190,29 @@ export const EFFECTS: EffectDef[] = [
     basis: 'simplified', source: 'Heart rate rises with hypoxia (well documented qualitatively); the 0.5 bpm/% magnitude is an illustrative assumption.',
   },
   {
-    id: 'sleep-opportunity', label: 'Sleep cannot exceed the sleep opportunity',
-    model: 'Sleep = min(opportunity, need) × efficiency. Opportunity = scheduled sleep hours − hours lost to events + recovery hours.',
-    basis: 'established', source: 'By definition: sleep can only occur within the time allowed. Spaceflight sleep is often curtailed by schedule (Barger et al., Lancet Neurol, 2014).',
+    id: 'sleep-opportunity', label: 'The sleep period limits sleep',
+    model: 'Sleep cannot exceed 90 % of the scheduled sleep period. Shown as the difference between that cap and the person’s sleep need.',
+    basis: 'established', source: 'By definition: sleep can only occur within the time allowed. ISS crews slept about 6 h in an 8.5 h period (Barger et al., Lancet Neurol, 2014); the 90 % efficiency is a round figure for a quiet cabin.',
+  },
+  {
+    id: 'event-sleep-loss', label: 'Events shorten or extend the sleep period',
+    model: 'Sleep-disruption events remove hours from the sleep period; recovery events add them.',
+    basis: 'established', source: 'Accounting identity on the scheduled sleep period.',
+  },
+  {
+    id: 'habitual-sleep', label: 'The person’s usual sleep limits sleep',
+    model: 'Sleep cannot exceed the person’s usual sleep plus catch-up sleep (0.1 h per hour of debt, at most 2 h). Shown as the difference from their sleep need.',
+    basis: 'simplified', source: 'People in sleep debt sleep longer when allowed (recovery sleep is documented); the catch-up rate is an assumption.',
+  },
+  {
+    id: 'sleep-debt', label: 'Nights below sleep need accumulate as sleep debt',
+    model: 'Debt(t) = Debt(t−1) × e^(−1/21) + (need − sleep), never below 0, at most 90 h. Starts from 60 pre-flight days at the person’s usual sleep.',
+    basis: 'established', source: 'Cumulative sleep debt drives performance decline without levelling off over 14 days (Van Dongen et al., Sleep, 2003). The 21-day decay (partial adaptation) is an assumption.',
+  },
+  {
+    id: 'sleep-debt-performance', label: 'Sleep debt causes reaction-time lapses, fatigue and lower mood',
+    model: 'Night-equivalents N = debt ÷ 30 h. PVT lapses = 2 + 6.5 × N + 0.6 × last night’s shortfall. Fatigue +2.2 × N + 0.25 × shortfall. Mood −1.2 × N. Stress +0.6 × N.',
+    basis: 'established', source: 'Lapses: Van Dongen et al. (Sleep, 2003): about 2 lapses well rested, about 8–9 after 14 days at 6 h (≈ one night without sleep), about 15 after 14 days at 4 h. Subjective sleepiness levelled off while lapses kept rising, so self-rated fatigue understates impairment. The fatigue, mood and stress slopes are assumptions.',
   },
   {
     id: 'noise-sleep', label: 'Noise reduces sleep efficiency',
@@ -190,7 +241,7 @@ export const EFFECTS: EffectDef[] = [
   },
   {
     id: 'sleep-debt-cardio', label: 'Sleep debt raises heart rate and lowers HRV',
-    model: 'Sleep debt = exponentially weighted (3-day) shortfall from sleep need. Resting HR +1.2 bpm and HRV −4 ms per hour of debt.',
+    model: 'Resting HR +1.5 bpm and HRV −6 ms per night-equivalent of sleep debt (debt ÷ 30 h).',
     basis: 'simplified', source: 'Sleep restriction raises resting heart rate and reduces HRV in laboratory studies; magnitudes here are illustrative assumptions.',
   },
   {
@@ -215,12 +266,12 @@ export const EFFECTS: EffectDef[] = [
   },
   {
     id: 'workload-stress', label: 'Workload and events set stress',
-    model: 'Stress = 1 + 0.6 × workload + event stress increases + 0.5 × hours of sleep debt.',
+    model: 'Stress = 1 + 0.6 × workload + event stress increases (+ the sleep-debt term above).',
     basis: 'simplified', source: 'Illustrative assumption. Stress is a modeled index, not a measurement.',
   },
   {
     id: 'fatigue-model', label: 'Fatigue from sleep debt, stress and workload',
-    model: 'Fatigue = 1.5 + 0.9 × debt + 0.35 × stress + 0.2 × workload + 1.0 × EVA hours / 6.',
+    model: 'Fatigue = 1.5 + 0.35 × stress + 0.2 × workload + EVA hours ÷ 6 (+ the sleep-debt terms above).',
     basis: 'simplified', source: 'Illustrative assumption. Fatigue is a modeled index, not a measurement.',
   },
   {
@@ -245,7 +296,7 @@ export const EFFECTS: EffectDef[] = [
   },
   {
     id: 'mood-model', label: 'Stress and sleep debt lower mood',
-    model: 'Mood = 7.5 − 0.6 × (stress − 3, if positive) − 0.4 × hours of sleep debt.',
+    model: 'Mood = 7.5 − 0.6 × (stress − 3, if positive) (+ the sleep-debt term above).',
     basis: 'simplified', source: 'Illustrative assumption. Mood is a modeled index, not a measurement.',
   },
   {

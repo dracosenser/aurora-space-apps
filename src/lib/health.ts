@@ -1,5 +1,6 @@
 import type { Alert, Astronaut, DailyRecord, IndicatorKey } from '../types'
 import { clamp, mean, slope } from './stats'
+import type { Assessment } from '../sim/assess'
 
 export type HealthStatus = 'nominal' | 'watch' | 'caution'
 
@@ -11,6 +12,8 @@ export interface AstronautStatus {
   recent: DailyRecord[]
   activeAlerts: Alert[]
   drivers: string[]
+  /** The evidence-based readiness assessment behind the score, when the data comes from a simulated mission. */
+  assessment?: Assessment
 }
 
 export function statusFromScore(score: number): HealthStatus {
@@ -87,6 +90,13 @@ export function computeStatus(astro: Astronaut, records: DailyRecord[], alerts: 
   score = Math.round(score)
   if (drivers.length === 0) drivers.push('All tracked indicators within personal baseline ranges')
   return { astronautId: astro.id, score, status: statusFromScore(score), latest, recent, activeAlerts, drivers }
+}
+
+/** Replace the legacy composite with the readiness assessment: its score, status and weakest areas. */
+export function withAssessment(s: AstronautStatus, a: Assessment | null): AstronautStatus {
+  if (!a) return s
+  const weak = a.findings.filter((f) => f.points >= 5).slice(0, 4).map((f) => f.title)
+  return { ...s, score: a.score, status: a.status, assessment: a, drivers: weak.length ? weak : ['Every area within its reference range'] }
 }
 
 export function crewScore(statuses: AstronautStatus[]): number {

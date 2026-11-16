@@ -1,6 +1,6 @@
 import { createRng } from '../lib/random'
 import { eventActiveOn, eventAffects } from './events'
-import { ENV_PARAMS, NOMINAL_ENVIRONMENT, SIM_INDICATORS } from './reference'
+import { ENV_PARAMS, NOMINAL_ENVIRONMENT, SIM_INDICATORS, SLEEP_MODEL } from './reference'
 import type { AstronautProfile, AstronautRun, Contribution, EnvKey, Environment, HourlyChannel, MissionConfig, MissionEvent, SimIndicator, SimulationResult } from './types'
 
 /**
@@ -94,7 +94,8 @@ export function validateConfig(config: MissionConfig): ValidationIssue[] {
       [b.respRate, 6, 30, 'Resp. rate', '/min'],
       [b.spo2, 80, 100, 'SpO₂', '%'],
       [b.bodyTemp, 34, 39, 'Body temp', '°C'],
-      [b.sleepNeed, 3, 12, 'Typical sleep', 'h'],
+      [b.sleepNeed, 2, 12, 'Usual sleep', 'h'],
+      [b.sleepRequirement ?? SLEEP_MODEL.defaultNeedH, 6, 10, 'Sleep need', 'h'],
       [b.variability, 0.2, 3, 'Variation', '×'],
       [b.systolicBP ?? 118, 70, 200, 'Systolic BP', 'mmHg'],
       [b.diastolicBP ?? 76, 40, 130, 'Diastolic BP', 'mmHg'],
@@ -109,6 +110,11 @@ export function validateConfig(config: MissionConfig): ValidationIssue[] {
         issues.push({ level: 'error', area: 'crew', targetId: a.id, message: `${who}: ${label} is ${Number.isFinite(v) ? `${v}${unit ? ` ${unit}` : ''}` : 'empty'}. Set it between ${lo} and ${hi}${unit ? ` ${unit}` : ''}.` })
     }
     if (!a.name.trim()) issues.push({ level: 'warning', area: 'crew', targetId: a.id, message: `Crew member ${a.id} has no name.` })
+    const need = b.sleepRequirement ?? SLEEP_MODEL.defaultNeedH
+    if (b.sleepNeed < SLEEP_MODEL.needRange[0])
+      issues.push({ level: 'warning', area: 'crew', targetId: a.id, message: `${who} usually sleeps ${b.sleepNeed} h but needs ${need} h. Every night short of the need adds to sleep debt, so expect falling performance (this is modeled, not an error).` })
+    if (a.schedule.sleepHours * SLEEP_MODEL.efficiency < need - 0.5)
+      issues.push({ level: 'warning', area: 'crew', targetId: a.id, message: `${who}'s ${a.schedule.sleepHours} h sleep period allows about ${(a.schedule.sleepHours * SLEEP_MODEL.efficiency).toFixed(1)} h of sleep, below their ${need} h need. A period of ${Math.ceil((need / SLEEP_MODEL.efficiency) * 4) / 4} h would cover it.` })
   }
   for (const p of ENV_PARAMS) {
     const v = config.environment[p.key]
@@ -213,6 +219,8 @@ const NOISE_SD: Record<SimIndicator, number> = {
   boneDensity: 0.01,
   mood: 0.45,
   sleepConsistency: 3,
+  sleepDebt: 0,
+  pvtLapses: 1,
 }
 
 function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: number, hourly: boolean): AstronautRun {
@@ -232,7 +240,11 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
 
   const b = a.baseline
   const s = a.schedule
-  const typical = b.sleepNeed
+  const usual = b.sleepNeed
+  const need = b.sleepRequirement ?? SLEEP_MODEL.defaultNeedH
+  const decay = Math.exp(-1 / SLEEP_MODEL.decayDays)
+  const catchUp = (d: number) => Math.min(SLEEP_MODEL.catchUpMaxH, SLEEP_MODEL.catchUpPerHour * d)
+  const stepDebt = (d: number, slept: number) => clamp(d * decay + (need - slept), 0, SLEEP_MODEL.maxDebtH)
   const nominalExercise = (s.exerciseSessionsPerWeek * s.exerciseMinutes) / 7
   const baseStress = 1 + 0.6 * s.workload
   const baseFatigue = 1.5 + 0.35 * baseStress + 0.2 * s.workload
@@ -242,7 +254,9 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
     return ar[id]
   }
 
+  // Arrive with the debt that 60 pre-flight days at the usual sleep (no schedule limit) would build.
   let debt = 0
+  for (let k = 0; k < 60; k++) debt = stepDebt(debt, usual + catchUp(debt))
   let decon = 0
   let muscle = 100
   let bone = 100
@@ -264,9 +278,16 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
     const hypoxHR = 0.5 * Math.max(0, -dSpO2)
     add('hypoxemia-heart-rate', 'restingHR', day, hypoxHR)
 
-    // Sleep.
-    const allowed = Math.min(x.sleepOpportunity * 0.95, typical)
-    add('sleep-opportunity', 'sleepDuration', day, allowed - typical)
+    // Sleep: limited by the sleep period and by the person's usual sleep (plus catch-up when in debt).
+    const schedCap = s.sleepHours * SLEEP_MODEL.efficiency
+    const oppCap = x.sleepOpportunity * SLEEP_MODEL.efficiency
+    const habitCap = usual + catchUp(debt)
+    const allowed = Math.min(oppCap, habitCap)
+    if (habitCap <= oppCap) add('habitual-sleep', 'sleepDuration', day, allowed - need)
+    else {
+      add('sleep-opportunity', 'sleepDuration', day, schedCap - need)
+      add('event-sleep-loss', 'sleepDuration', day, oppCap - schedCap)
+    }
     const outside = env.cabinTempC < 18 ? env.cabinTempC - 18 : env.cabinTempC > 27 ? env.cabinTempC - 27 : 0
     const pen = {
       noise: 0.006 * Math.max(0, env.noiseDBA - 50),
@@ -293,10 +314,15 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
     add('co2-sleep', 'sleepQuality', day, co2Quality)
     quality += co2Quality
 
-    // Sleep debt (3-day exponentially weighted shortfall), stress, deconditioning.
-    debt = (2 / 3) * debt + (1 / 3) * Math.max(0, typical - sleep)
-    const stress = clamp(1 + 0.6 * x.workload + x.eventStress + 0.5 * debt, 0, 10)
-    add('workload-stress', 'stress', day, stress - baseStress)
+    // Sleep debt accumulates from the night actually slept (Van Dongen et al., 2003).
+    const slept = clamp(sleep + noise('sleepDuration'), 0, 14)
+    const shortfall = Math.max(0, need - slept)
+    debt = stepDebt(debt, slept)
+    const nights = debt / SLEEP_MODEL.nightEquivalentH
+    const debtStress = 0.6 * nights
+    const stress = clamp(1 + 0.6 * x.workload + x.eventStress + debtStress, 0, 10)
+    add('workload-stress', 'stress', day, stress - debtStress - baseStress)
+    add('sleep-debt-performance', 'stress', day, debtStress)
     add('workload-stress', 'workload', day, x.workload - s.workload)
     const stressExcess = Math.max(0, stress - 3)
     add('stress-sleep', 'sleepQuality', day, -2 * stressExcess)
@@ -307,12 +333,13 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
     decon += (target - decon) / 21
 
     // Cardiovascular.
-    const hrDebt = 1.2 * debt
+    const hrDebt = 1.5 * nights
+    const hrvDebt = -6 * nights
     const hrStress = 0.8 * stressExcess
     add('sleep-debt-cardio', 'restingHR', day, hrDebt)
     add('stress-cardio', 'restingHR', day, hrStress)
     add('deconditioning', 'restingHR', day, decon)
-    add('sleep-debt-cardio', 'hrv', day, -4 * debt)
+    add('sleep-debt-cardio', 'hrv', day, hrvDebt)
     add('stress-cardio', 'hrv', day, -2 * stressExcess)
     add('deconditioning', 'hrv', day, -1.25 * decon)
 
@@ -325,18 +352,25 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
     // Activity, fatigue, dose.
     const activityDelta = x.exerciseMin - nominalExercise + x.evaHours * 60
     add('activity-accounting', 'activityMinutes', day, activityDelta)
-    const fatigue = clamp(1.5 + 0.9 * debt + 0.35 * stress + 0.2 * x.workload + x.evaHours / 6, 0, 10)
-    add('fatigue-model', 'fatigue', day, fatigue - baseFatigue)
+    const fatigueDebt = 2.2 * nights + 0.25 * shortfall
+    const fatigue = clamp(1.5 + fatigueDebt + 0.35 * stress + 0.2 * x.workload + x.evaHours / 6, 0, 10)
+    add('sleep-debt-performance', 'fatigue', day, fatigueDebt)
+    add('fatigue-model', 'fatigue', day, fatigue - fatigueDebt - baseFatigue)
+    const pvt = SLEEP_MODEL.pvtRested + SLEEP_MODEL.pvtPerNight * nights + 0.6 * shortfall
+    add('sleep-debt-performance', 'pvtLapses', day, pvt - SLEEP_MODEL.pvtRested)
+    add('sleep-debt', 'sleepDebt', day, debt)
     const background = config.environment.radiationMSvPerDay
     const dose = env.radiationMSvPerDay + x.extraDose + x.evaHours * (env.radiationMSvPerDay / 24) * (x.evaDoseMultiplier - 1)
     add('dose-accounting', 'radiationDose', day, dose - background)
 
     daily.restingHR[i] = clamp(b.restingHR + hypoxHR + hrDebt + hrStress + decon + noise('restingHR'), 30, 200)
-    daily.hrv[i] = clamp(b.hrv - 4 * debt - 2 * stressExcess - 1.25 * decon + noise('hrv'), 5, 250)
+    daily.hrv[i] = clamp(b.hrv + hrvDebt - 2 * stressExcess - 1.25 * decon + noise('hrv'), 5, 250)
     daily.respRate[i] = clamp(b.respRate + rrCO2 + noise('respRate'), 4, 60)
     daily.spo2[i] = clamp(b.spo2 + dSpO2 + noise('spo2'), 50, 100)
     daily.bodyTemp[i] = clamp(b.bodyTemp + tempShift + noise('bodyTemp'), 33, 42)
-    daily.sleepDuration[i] = clamp(sleep + noise('sleepDuration'), 0, 14)
+    daily.sleepDuration[i] = slept
+    daily.sleepDebt[i] = debt
+    daily.pvtLapses[i] = clamp(pvt + noise('pvtLapses'), 0, 40)
     daily.sleepQuality[i] = clamp(quality + noise('sleepQuality'), 0, 100)
     daily.activityMinutes[i] = clamp(b.activityMinutes + activityDelta + noise('activityMinutes'), 0, 1440)
     daily.workload[i] = x.workload
@@ -353,8 +387,9 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
     add('muscle-deconditioning', 'muscleStrength', day, muscle - 100)
     add('bone-loss', 'boneDensity', day, bone - 100)
     const moodStress = -0.6 * stressExcess
-    const moodDebt = -0.4 * debt
-    add('mood-model', 'mood', day, moodStress + moodDebt)
+    const moodDebt = -1.2 * nights
+    add('mood-model', 'mood', day, moodStress)
+    add('sleep-debt-performance', 'mood', day, moodDebt)
     add('exercise-log', 'exerciseMinutes', day, x.exerciseMin - nominalExercise)
     daily.muscleStrength[i] = clamp(muscle + noise('muscleStrength'), 30, 130)
     daily.boneDensity[i] = clamp(bone + noise('boneDensity'), 70, 105)

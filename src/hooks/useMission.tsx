@@ -2,9 +2,10 @@ import { createContext, useCallback, useContext, useDeferredValue, useEffect, us
 import type { Alert, AssistantMessage, DailyRecord, PageId, ScenarioParams } from '../types'
 import { ASTRONAUTS } from '../data/astronauts'
 import { EVENTS, MISSION } from '../data/mission'
-import { minViewDay } from '../sim/launch'
+import { launchedRun, minViewDay } from '../sim/launch'
+import { assess } from '../sim/assess'
 import { detectAnomalies } from '../lib/anomaly'
-import { computeStatus, crewScore, type AstronautStatus } from '../lib/health'
+import { computeStatus, crewScore, withAssessment, type AstronautStatus } from '../lib/health'
 import { EMPTY_LOG, batteryComplete, newlyEarned, pointsForReading, type CrewLog, pointsForVeilStep } from '../lib/gamify'
 import type { CheckId } from '../data/selfcheck'
 
@@ -147,7 +148,10 @@ export function MissionProvider({ children, records, missionKey }: { children: R
     }
     return a
   }, [records, day, alertCache])
-  const statuses = useMemo(() => ASTRONAUTS.map((a) => computeStatus(a, records, alerts, day)), [records, alerts, day])
+  const statuses = useMemo(() => {
+    const { config, result } = launchedRun()
+    return ASTRONAUTS.map((a) => withAssessment(computeStatus(a, records, alerts, day), assess(config, result, a.id, day)))
+  }, [records, alerts, day])
   const crew = useMemo(() => crewScore(statuses), [statuses])
 
   const value: MissionState = {

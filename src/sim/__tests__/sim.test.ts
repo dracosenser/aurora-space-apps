@@ -215,8 +215,12 @@ describe('events', () => {
     m.events = [newEvent('sleep-disruption', 30, 7, 'Nights', { params: { sleepLossHours: 3 } })]
     const r = simulate(m).astronauts[0]
     const base = simulate(mission({ environment: { ...NOMINAL_ENVIRONMENT, gravityG: 1 } })).astronauts[0]
-    expect(mean(r.daily.restingHR, 33, 37)).toBeGreaterThan(mean(base.daily.restingHR, 33, 37) + 1.5)
-    expect(Math.abs(mean(r.daily.restingHR, 50, 60) - mean(base.daily.restingHR, 50, 60))).toBeLessThan(0.3)
+    expect(mean(r.daily.restingHR, 33, 37)).toBeGreaterThan(mean(base.daily.restingHR, 33, 37) + 0.5)
+    // A week of 3 h sleep loss costs reaction-test performance, and the debt takes weeks to clear (Van Dongen 2003; Belenky 2003).
+    expect(mean(r.daily.pvtLapses, 33, 37)).toBeGreaterThan(mean(base.daily.pvtLapses, 33, 37) + 2.5)
+    expect(mean(r.daily.sleepDebt, 45, 50)).toBeGreaterThan(mean(base.daily.sleepDebt, 45, 50))
+    expect(mean(r.daily.sleepDebt, 45, 50)).toBeLessThan(mean(r.daily.sleepDebt, 36, 37))
+    expect(Math.abs(mean(r.daily.restingHR, 50, 60) - mean(base.daily.restingHR, 50, 60))).toBeLessThan(0.5)
     expect(r.contributions.some((c) => c.effectId === 'sleep-debt-cardio')).toBe(true)
   })
 

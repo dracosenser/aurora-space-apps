@@ -67,6 +67,28 @@ Variables recorded but **not** used by any effect, because no defensible relatio
 
 **Indicators.** Measurable on a real mission: resting HR, HRV, respiratory rate, SpO₂, body temperature, sleep duration, activity, daily dose. Modeled estimates with no direct sensor (marked * in the UI): sleep quality, workload, stress, fatigue.
 
+## Readiness assessment
+
+`src/sim/assess.ts` turns a simulated run into a 0–100 readiness score per astronaut per day. It replaces the earlier composite, which compared each person only with their own baseline and was capped by noisy alerts: a person entered as needing 3 h of sleep was treated as rested, and scores jumped whenever an alert opened or closed.
+
+**Sleep is modeled against need, not habit.** Each astronaut has a *usual sleep* (what they actually sleep, the field the builder used to call "typical sleep") and a *sleep need* (default 8 h; adults need 7–9 h, Watson et al., *Sleep* 2015). Each night adds (need − sleep) hours to a cumulative sleep debt that decays with a 21-day time constant. Following Van Dongen et al. (*Sleep* 2003), 30 h of debt impairs performance about as much as one night without sleep, and expected reaction-test (PVT) lapses rise from about 2 per 10-minute test when rested to about 8.5 per night-equivalent of debt, without levelling off. Self-rated sleepiness levels off while lapses keep rising, so the assessment tells controllers to judge alertness by the reaction test. Sleep debt also raises resting heart rate, lowers HRV and mood, and raises fatigue and stress. Two new simulated indicators carry this: `sleepDebt` (h) and `pvtLapses`.
+
+**Score.** Five areas, each scored 0–100 by subtracting points for findings computed from 7-day means or cumulative states:
+
+| Area | Weight | Points lost for |
+|---|---|---|
+| Sleep and alertness | 30 % | sleep debt (40 per night-equivalent), sleep quality below 70, consistency below 75 |
+| Behavioral health | 20 % | fatigue above 3.5, stress above 4.5, mood below 6 |
+| Muscle and bone | 20 % | exercise below 60 min/day in reduced gravity, strength loss beyond 2 %, bone loss beyond 0.5 % |
+| Cardiopulmonary | 15 % | resting HR beyond +2 bpm of baseline, HRV drop beyond 8 %, blood-pressure stage 1/2 (2017 ACC/AHA), SpO₂ below 95 % |
+| Cabin and radiation exposure | 15 % | each cabin parameter outside its reference range; radiation as a share of the 600 mSv career limit (NASA-STD-3001 Vol. 1 Rev. B) |
+
+The score is the weighted mean, held to at most the weakest area + 30 so one severe deficit cannot be averaged away. Status: ≥ 80 nominal, 65–79 watch, < 65 caution. The weights and point slopes are AURORA's operational choices for ranking attention, not a validated clinical instrument.
+
+**Weaknesses and recommendations.** Each finding lists its evidence against the reference, the model effects that caused it (summed from the run's per-effect contributions), a lagged correlation from the astronaut's own data when |r| ≥ 0.3 over at least 14 day pairs, and a recommendation chosen from the dominant cause: extend the sleep period, treat short habitual sleep as a medical-operations issue, add recovery sleep after disruptive events, restore countermeasure exercise, lighten workload, or bring a cabin parameter back to nominal. Each recommendation that can be expressed as a mission change is tested by re-running that astronaut's simulation with it (from tomorrow when there is time left, otherwise from mission start) and reporting the readiness it produces.
+
+The Medical Monitor shows the full assessment; Mission Control, crew cards, profiles, reports and the assistant use its score and weakest areas.
+
 ## Detection and explanation
 
 Each astronaut's simulated daily series, with the varying cabin conditions as context, is analysed by the unchanged Constellation Engine (`docs/CONSTELLATION_ENGINE.md`): robust personal baselines, EWMA deviation tracking, and the multivariate joint statistic. Alerts use deliberately non-diagnostic language:

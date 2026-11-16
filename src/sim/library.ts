@@ -30,7 +30,7 @@ export function newAstronaut(index: number, patch: Partial<AstronautProfile> = {
     color: CREW_COLORS[index % CREW_COLORS.length],
     participates: true,
     schedule: { sleepStartHour: 22, sleepHours: 8.5, workHours: 9, exerciseSessionsPerWeek: 6, exerciseMinutes: 75, exerciseHour: 16, workload: 3 },
-    baseline: { restingHR: 60, hrv: 60, respRate: 14, spo2: 98, bodyTemp: 36.7, sleepNeed: 7, activityMinutes: 140, variability: 1, systolicBP: 118, diastolicBP: 76 },
+    baseline: { restingHR: 60, hrv: 60, respRate: 14, spo2: 98, bodyTemp: 36.7, sleepNeed: 7.5, sleepRequirement: 8, activityMinutes: 140, variability: 1, systolicBP: 118, diastolicBP: 76 },
     ...patch,
   }
 }
@@ -86,8 +86,8 @@ function env(patch: Partial<Environment>): Environment {
 export function exampleMissions(): MissionConfig[] {
   const mars = blankMission()
   const crew = [
-    newAstronaut(0, { name: 'Maren Holt', callsign: 'Holt', role: 'Commander', responsibilities: 'Operations, EVA planning', baseline: { restingHR: 56, hrv: 62, respRate: 13, spo2: 98, bodyTemp: 36.6, sleepNeed: 6.8, activityMinutes: 150, variability: 1 } }),
-    newAstronaut(1, { name: 'Kenji Arakawa', callsign: 'Arakawa', role: 'Flight Engineer', responsibilities: 'Life support, exercise hardware', schedule: { sleepStartHour: 22, sleepHours: 8.5, workHours: 10, exerciseSessionsPerWeek: 6, exerciseMinutes: 75, exerciseHour: 7, workload: 3.5 }, baseline: { restingHR: 60, hrv: 55, respRate: 14, spo2: 98, bodyTemp: 36.7, sleepNeed: 6.6, activityMinutes: 160, variability: 1.1 } }),
+    newAstronaut(0, { name: 'Maren Holt', callsign: 'Holt', role: 'Commander', responsibilities: 'Operations, EVA planning', baseline: { restingHR: 56, hrv: 62, respRate: 13, spo2: 98, bodyTemp: 36.6, sleepNeed: 7.2, activityMinutes: 150, variability: 1 } }),
+    newAstronaut(1, { name: 'Kenji Arakawa', callsign: 'Arakawa', role: 'Flight Engineer', responsibilities: 'Life support, exercise hardware', schedule: { sleepStartHour: 22, sleepHours: 8.5, workHours: 10, exerciseSessionsPerWeek: 6, exerciseMinutes: 75, exerciseHour: 7, workload: 3.5 }, baseline: { restingHR: 60, hrv: 55, respRate: 14, spo2: 98, bodyTemp: 36.7, sleepNeed: 7, activityMinutes: 160, variability: 1.1 } }),
     newAstronaut(2, { name: 'Amara Diallo', callsign: 'Diallo', role: 'Flight Surgeon', responsibilities: 'Crew medical', baseline: { restingHR: 58, hrv: 68, respRate: 13, spo2: 98, bodyTemp: 36.7, sleepNeed: 7.1, activityMinutes: 130, variability: 0.9 } }),
     newAstronaut(3, { name: 'Luca Ferreira', callsign: 'Ferreira', role: 'Science Officer', responsibilities: 'Geology, rover traverses', baseline: { restingHR: 54, hrv: 74, respRate: 12, spo2: 98, bodyTemp: 36.5, sleepNeed: 7.3, activityMinutes: 155, variability: 1 } }),
   ]

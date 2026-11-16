@@ -225,7 +225,8 @@ function AstronautEditor({ a, update }: { a: AstronautProfile; update: (fn: (a: 
           <Field label="Resp. rate (/min)"><Num value={a.baseline.respRate} min={6} max={30} step={0.5} onChange={(v) => b({ respRate: v })} /></Field>
           <Field label="SpO₂ (%)"><Num value={a.baseline.spo2} min={80} max={100} step={0.5} onChange={(v) => b({ spo2: v })} /></Field>
           <Field label="Body temp (°C)"><Num value={a.baseline.bodyTemp} min={34} max={39} step={0.1} onChange={(v) => b({ bodyTemp: v })} /></Field>
-          <Field label="Typical sleep (h)"><Num value={a.baseline.sleepNeed} min={3} max={12} step={0.1} onChange={(v) => b({ sleepNeed: v })} /></Field>
+          <Field label="Usual sleep (h)" hint="How long they actually sleep"><Num value={a.baseline.sleepNeed} min={2} max={12} step={0.1} onChange={(v) => b({ sleepNeed: v })} /></Field>
+          <Field label="Sleep need (h)" hint="Adults 7–9 h; default 8"><Num value={a.baseline.sleepRequirement ?? 8} min={6} max={10} step={0.1} onChange={(v) => b({ sleepRequirement: v })} /></Field>
           <Field label="Activity (min/day)" hint="Including scheduled exercise"><Num value={a.baseline.activityMinutes} min={0} max={900} step={5} onChange={(v) => b({ activityMinutes: v })} /></Field>
           <Field label="Variation (×)" hint="1 = typical"><Num value={a.baseline.variability} min={0.2} max={3} step={0.1} onChange={(v) => b({ variability: v })} /></Field>
           <Field label="Systolic BP (mmHg)"><Num value={a.baseline.systolicBP ?? 118} min={80} max={180} onChange={(v) => b({ systolicBP: v })} /></Field>

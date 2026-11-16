@@ -26,8 +26,16 @@ export interface AstronautBaseline {
   respRate: number
   spo2: number
   bodyTemp: number
-  /** Sleep this person typically needs to feel rested, hours. */
+  /**
+   * How long this person usually sleeps when given the chance, hours (their
+   * habit). Kept under its original name so saved missions still load.
+   */
   sleepNeed: number
+  /**
+   * Physiological sleep need, hours. Defaults to 8 h (adults need 7–9 h).
+   * Every night below it adds to sleep debt, whatever the person's habit.
+   */
+  sleepRequirement?: number
   /** Typical daily activity, minutes. */
   activityMinutes: number
   /** Day-to-day variation multiplier: 1 = typical, 0.5 = very steady, 2 = very variable. */
@@ -147,6 +155,8 @@ export type SimIndicator =
   | 'boneDensity'
   | 'mood'
   | 'sleepConsistency'
+  | 'sleepDebt'
+  | 'pvtLapses'
 
 /** Hourly channels, produced only at hourly resolution. */
 export type HourlyChannel = 'heartRate' | 'respRate' | 'spo2' | 'bodyTemp' | 'activity'

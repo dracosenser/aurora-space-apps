@@ -6,6 +6,8 @@ import { Button } from '../components/ui/Button'
 import { Disclaimer, EmptyState } from '../components/ui/Misc'
 import { useMission } from '../hooks/useMission'
 import { AlertCardSim, IndividualView, fmt } from '../features/missions/Results'
+import { ReadinessPanel } from '../features/missions/Readiness'
+import { assess } from '../sim/assess'
 import { SignalVeilExperience } from '../features/signal-veil'
 import { InsightPanel } from '../features/signal-veil/ui/InsightPanel'
 import { colorForCategory } from '../features/signal-veil/model/layout'
@@ -73,7 +75,7 @@ export function MedicalMonitor() {
         eyebrow="Operations · Medical"
         plate="PLATE MED"
         title="Medical Monitor"
-        description="Select any astronaut on the active mission: current simulated measurements against their baseline, trends, monitoring alerts with their explanation, the events around each change, and Signal Veil on their data. Simulated data; not a diagnostic system."
+        description="Select any astronaut on the active mission: a readiness score built from published reference points, their weaknesses with the evidence and causes, recommendations tested by re-simulation, current measurements against their baseline, trends, monitoring alerts with their explanation, the events around each change, and Signal Veil on their data. Simulated data; not a diagnostic system."
         actions={
           <Button variant="outline" onClick={() => setPage('missions')}>
             Edit mission
@@ -105,6 +107,7 @@ export function MedicalMonitor() {
           const run = result.astronauts.find((a) => a.astronautId === c.id)!
           const act = alerts.filter((a) => a.astronautId === c.id && a.active)
           const on = person?.id === c.id
+          const ready = assess(config, result, c.id, d)
           return (
             <button key={c.id} onClick={() => { setWho(c.id); setVeil(false) }} className={`bg-surface p-3 text-left transition-colors hover:bg-surface-3/60 ${on ? 'outline outline-1 -outline-offset-1 outline-accent' : ''}`}>
               <div className="flex items-center gap-2">
@@ -112,7 +115,13 @@ export function MedicalMonitor() {
                 <span className="truncate text-sm text-text-strong">{c.name}</span>
                 {act.length > 0 ? <Badge tone={act.some((a) => a.level === 'pattern-requiring-investigation') ? 'ember' : 'warn'}>{act.length} alert{act.length > 1 ? 's' : ''}</Badge> : <Badge tone="ok">no alerts</Badge>}
               </div>
-              <p className="mono mt-1.5 text-[11px] text-muted">
+              {ready && (
+                <p className="mt-1.5 flex items-baseline gap-2">
+                  <span className={`mono text-xl ${ready.status === 'nominal' ? 'text-ok' : ready.status === 'watch' ? 'text-warn' : 'text-danger'}`}>{ready.score}</span>
+                  <span className="truncate text-[11px] text-muted">{ready.findings[0] && ready.findings[0].points >= 5 ? ready.findings[0].title : 'No significant weakness'}</span>
+                </p>
+              )}
+              <p className="mono mt-1 text-[11px] text-muted">
                 HR {fmt(run.daily.restingHR[d - 1], 0)} (base {c.baseline.restingHR}) · SpO₂ {fmt(run.daily.spo2[d - 1], 1)} · sleep {fmt(run.daily.sleepDuration[d - 1], 1)} h
               </p>
               <p className="text-[10.5px] text-faint">{c.role}</p>
@@ -123,6 +132,7 @@ export function MedicalMonitor() {
 
       {person && analysis && dataset && (
         <div className="space-y-4">
+          <ReadinessPanel m={config} r={result} personId={person.id} day={d} />
           <IndividualView m={config} r={result} personId={person.id} day={d} onDay={setDay} />
 
           <div className="grid gap-4 xl:grid-cols-12">

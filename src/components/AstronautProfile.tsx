@@ -63,7 +63,7 @@ export function AstronautProfile({ astronaut, onClose }: { astronaut: Astronaut;
 
         <div className="space-y-5 px-5 py-5">
           <div className="rounded-lg border border-border bg-surface p-4">
-            <p className="eyebrow">Status drivers (trailing 7 days vs pre-flight baseline)</p>
+            <p className="eyebrow">Weakest areas (readiness assessment, last 7 days; evidence and fixes in the Medical Monitor)</p>
             <ul className="mt-2 flex flex-wrap gap-2">
               {status.drivers.map((d) => (
                 <li key={d} className="rounded border border-border-strong bg-surface-2 px-2 py-1 text-xs text-text">
