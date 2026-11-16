@@ -1,7 +1,12 @@
-import { FLOATS_PER_VERTEX, buildEmissive, buildHatches, buildStructure, type MeshData } from './geometry'
+import {
+  FLOATS_PER_VERTEX, buildBackstop, buildEmissive, buildHatches, buildStructure, type MeshData,
+} from './geometry'
 import { buildExterior } from './exterior'
 import { fpsView, forward, identity, multiply, orthographic, perspective, lookAt, type Mat4 } from './mat4'
-import { DEPTH_FRAG, DEPTH_VERT, EMISSIVE_FRAG, SCENE_FRAG, SCENE_VERT, SKY_COMPOSITE_FRAG, SKY_FRAG, SKY_VERT } from './shaders'
+import {
+  BACKSTOP_FRAG, BACKSTOP_VERT, DEPTH_FRAG, DEPTH_VERT, EMISSIVE_FRAG, SCENE_FRAG, SCENE_VERT,
+  SKY_COMPOSITE_FRAG, SKY_FRAG, SKY_VERT,
+} from './shaders'
 import { CUPOLA, DOOR_BY_ID, ROOMS } from '../model/deck'
 import { FIXTURES } from './fixtures'
 import { QUALITY, type Quality, type QualityName } from './quality'
@@ -130,6 +135,10 @@ export class DeckRenderer {
   private shadowFbo: WebGLFramebuffer | null = null
   private shadowTex: WebGLTexture | null = null
   private compProg: WebGLProgram
+  private backProg: WebGLProgram
+  private backVao: WebGLVertexArrayObject | null
+  private backBuf: WebGLBuffer | null
+  private backCount: number
   private skyFbo: WebGLFramebuffer | null = null
   private skyTex: WebGLTexture | null = null
   private skyW = 0
@@ -182,6 +191,7 @@ export class DeckRenderer {
     this.emisProg = link(gl, SCENE_VERT, EMISSIVE_FRAG, 'Emissive')
     this.depthProg = link(gl, DEPTH_VERT, DEPTH_FRAG, 'Depth')
     this.compProg = link(gl, SKY_VERT, SKY_COMPOSITE_FRAG, 'Sky composite')
+    this.backProg = link(gl, BACKSTOP_VERT, BACKSTOP_FRAG, 'Backstop')
 
     for (const [name, prog, names] of [
       ['sky', this.skyProg, ['uRight', 'uUp', 'uFwd', 'uAspect', 'uTanHalfFov', 'uTime', 'uEarthDir', 'uEarthDist', 'uEarthR', 'uSunDir', 'uOct']],
@@ -189,6 +199,7 @@ export class DeckRenderer {
       ['emis', this.emisProg, ['uViewProj', 'uLightViewProj', 'uModel', 'uTime', 'uAlert']],
       ['depth', this.depthProg, ['uLightViewProj', 'uModel']],
       ['comp', this.compProg, ['uSky']],
+      ['back', this.backProg, ['uViewProj']],
     ] as const) {
       this.u[name] = {}
       for (const n of names) this.u[name][n] = gl.getUniformLocation(prog, n)
@@ -197,18 +208,24 @@ export class DeckRenderer {
     const structure = buildStructure()
     const emissive = buildEmissive()
     const hatch = buildHatches()
+    const backstop = buildBackstop()
     const outside = buildExterior()
     this.structCount = structure.count
     this.emisCount = emissive.count
     this.hatchCount = hatch.count
+    this.backCount = backstop.count
     this.extCount = outside.count
     this.structBuf = gl.createBuffer()
     this.emisBuf = gl.createBuffer()
     this.hatchBuf = gl.createBuffer()
+    this.backBuf = gl.createBuffer()
     this.extBuf = gl.createBuffer()
     this.structVao = this.makeVao(structure, this.structBuf)
     this.emisVao = this.makeVao(emissive, this.emisBuf)
     this.hatchVao = this.makeVao(hatch, this.hatchBuf)
+    this.backVao = this.makeDepthVao(this.backBuf)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.backBuf)
+    gl.bufferData(gl.ARRAY_BUFFER, backstop.vertices, gl.STATIC_DRAW)
     this.extVao = this.makeVao(outside, this.extBuf)
     this.depthVao = this.makeDepthVao(this.structBuf)
     this.emptyVao = gl.createVertexArray()
@@ -377,6 +394,20 @@ export class DeckRenderer {
   /** For the diagnostics readout: was the planet pass skipped this frame? */
   get planetSkipped(): boolean {
     return this.skySkipped
+  }
+
+  /**
+   * The aperture rectangle, exposed for the hull-integrity test.
+   *
+   * That test clears the frame to a colour nothing in the vessel uses and
+   * looks for it surviving, which finds any gap you could see space through.
+   * The cupola and an open hatch are deliberate gaps, so the test has to know
+   * where they are, and the only correct answer is the one the renderer uses
+   * itself.
+   */
+  apertureBox(f: DeckFrame, w: number, h: number): [number, number, number, number] | null {
+    if (this.aperture(f) === null) return [0, 0, 0, 0]
+    return this.cupolaScissor(f, w, h)
   }
 
   /** Pixels the planet pass was scissored to this frame. */
@@ -689,6 +720,17 @@ export class DeckRenderer {
       gl.uniformMatrix4fv(cu.uModel, false, this.ident)
     }
 
+    // ---- backstop: last of the opaque passes, so the depth test has the
+    // whole interior in front of it. On hardware with early depth rejection
+    // this costs essentially nothing; on one without it, the flat shader
+    // keeps it cheap anyway.
+    if (!outside) {
+      gl.useProgram(this.backProg)
+      gl.uniformMatrix4fv(this.u.back.uViewProj, false, this.viewProj)
+      gl.bindVertexArray(this.backVao)
+      gl.drawArrays(gl.TRIANGLES, 0, this.backCount)
+    }
+
     // ---- emissive, added
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE)
@@ -787,10 +829,12 @@ export class DeckRenderer {
     if (this.structBuf) gl.deleteBuffer(this.structBuf)
     if (this.emisBuf) gl.deleteBuffer(this.emisBuf)
     if (this.hatchBuf) gl.deleteBuffer(this.hatchBuf)
+    if (this.backBuf) gl.deleteBuffer(this.backBuf)
     if (this.extBuf) gl.deleteBuffer(this.extBuf)
     if (this.structVao) gl.deleteVertexArray(this.structVao)
     if (this.emisVao) gl.deleteVertexArray(this.emisVao)
     if (this.hatchVao) gl.deleteVertexArray(this.hatchVao)
+    if (this.backVao) gl.deleteVertexArray(this.backVao)
     if (this.extVao) gl.deleteVertexArray(this.extVao)
     if (this.depthVao) gl.deleteVertexArray(this.depthVao)
     if (this.emptyVao) gl.deleteVertexArray(this.emptyVao)
@@ -799,13 +843,14 @@ export class DeckRenderer {
     if (this.skyFbo) gl.deleteFramebuffer(this.skyFbo)
     if (this.skyTex) gl.deleteTexture(this.skyTex)
     gl.deleteProgram(this.compProg)
+    gl.deleteProgram(this.backProg)
     gl.deleteProgram(this.skyProg)
     gl.deleteProgram(this.sceneProg)
     gl.deleteProgram(this.emisProg)
     gl.deleteProgram(this.depthProg)
-    this.structBuf = this.emisBuf = this.hatchBuf = this.extBuf = null
+    this.structBuf = this.emisBuf = this.hatchBuf = this.extBuf = this.backBuf = null
     this.structVao = this.emisVao = this.depthVao = this.emptyVao = null
-    this.hatchVao = this.extVao = null
+    this.hatchVao = this.extVao = this.backVao = null
     this.shadowFbo = null
     this.shadowTex = null
     this.skyFbo = null

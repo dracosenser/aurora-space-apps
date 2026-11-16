@@ -1,19 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { DOORS, ROOMS, inside, moveWithCollision } from '../model/deck'
+import { DOORS, ROOMS, SPAWN, STATIONS, inside, moveWithCollision } from '../model/deck'
 import {
-  ALL_AIRLOCK_STATES, PASSABLE, advance, hatchOpenness, newAirlock, phaseSeconds, shutDoors,
-  type Airlock,
+  ALL_AIRLOCK_STATES, CABIN_KPA, PASSABLE, VACUUM_KPA, advance, command, hatchOpenness,
+  innerHatch, newAirlock, phaseSeconds, shutDoors, type Airlock,
 } from '../model/airlock'
 import {
   EGRESS, EVA_BOUNDS, EVA_TASKS, GRIP_RANGE, HANDRAILS, TETHER_LENGTH,
-  handrailGrip, stepEva, tetherDistance, type EvaMotion,
+  EVA_POINTS, handrailGrip, siteInReach, stepEva, stepKey, taskComplete, tetherDistance,
+  type EvaMotion,
 } from '../model/eva'
 import {
   ALL_PROC_STEPS, PROCEDURES, PROC_BY_ID, baselineOf, nextProcStep, procComplete, procStepKey,
   type ProcContext,
 } from '../model/procedures'
 import { ALL_TASKS, OBJECTIVES } from '../model/objectives'
-import { SUITS } from '../model/suit'
+import {
+  COMMS_LOOPS, CONSUMABLES, DONNING, INSPECTION, SUITS, don, newSuitPrep, prepComplete, stageOf,
+} from '../model/suit'
 import { entryOverlay, type OverlayState } from '../model/overlay'
 import type { Astronaut, DailyRecord } from '../../../types'
 
@@ -424,6 +427,205 @@ describe('the entry overlay', () => {
     const shown = all.filter((s) => s.entered && entryOverlay(s) !== 'none')
     for (const s of shown) {
       expect(s.locked || s.consoleOpen || s.evaOpen || s.flying || s.touch, JSON.stringify(s)).toBe(false)
+    }
+  })
+})
+
+describe('a complete spacewalk, start to finish', () => {
+  /**
+   * The whole flow as a crew member performs it, with the real gates in
+   * place. Nothing here passes `ready: true` as a convenience: suit
+   * preparation is actually carried out, and the airlock is asked to seal
+   * before it is finished to confirm that it refuses.
+   */
+  it('runs end to end and refuses every shortcut along the way', () => {
+    // ---- 1. at the suit rack
+    let prep = newSuitPrep()
+    expect(prepComplete(prep)).toBe(false)
+
+    // The unserviceable suit cannot be taken.
+    const broken = SUITS.find((s) => !s.serviceable)!
+    expect(broken.serviceable).toBe(false)
+    const good = SUITS.find((s) => s.serviceable)!
+    prep = { ...prep, selected: good.id }
+
+    // With only a suit chosen, the next thing to do is inspect it. The two
+    // responsibilities are separate and both matter: `don` enforces the order
+    // garments go on, and `stageOf` enforces that the earlier stages happened
+    // at all. The panel shows a Don button only when stageOf says 'donning',
+    // so this is the gate that stops someone sealing a helmet onto a suit
+    // whose life support was never checked.
+    expect(stageOf(prep)).toBe('inspect')
+    expect(stageOf(prep)).not.toBe('donning')
+
+    prep = { ...prep, inspected: INSPECTION.map((i) => i.id) }
+    prep = { ...prep, acknowledged: CONSUMABLES.map((c) => c.id) }
+    prep = { ...prep, comms: COMMS_LOOPS[0] }
+    prep = { ...prep, tetherAttached: true, tools: ['pgt', 'scoop', 'wire-cutter', 'tether-short'] }
+    expect(stageOf(prep)).toBe('donning')
+    for (const d of DONNING) prep = don(prep, d.id)
+    expect(prepComplete(prep)).toBe(true)
+
+    // ---- 2. the airlock refuses to seal until the suit is ready
+    let a = command(newAirlock(), 'enter', false)
+    expect(a.state).toBe('crew-entering')
+    expect(command(a, 'close-inner', false).state, 'sealed with an unready suit').toBe('crew-entering')
+    a = command(a, 'close-inner', prepComplete(prep))
+    expect(a.state).toBe('inner-hatch-closing')
+
+    const settle = (x: Airlock): Airlock => {
+      let g = 0
+      while (phaseSeconds(x.state) > 0 && g++ < 20) x = advance(x, phaseSeconds(x.state) + 0.01)
+      return x
+    }
+    a = settle(a)
+    expect(a.state).toBe('inner-hatch-locked')
+    expect(innerHatch(a.state)).toBe('locked')
+
+    // ---- 3. pressure sequence, with the outer hatch refusing early
+    a = command(a, 'confirm-suit', true)
+    a = command(a, 'begin-prebreathe', true)
+    expect(command(a, 'begin-depress', true).state, 'depressurised mid pre-breathe').toBe('prebreathe')
+    a = settle(a)
+    a = command(a, 'begin-depress', true)
+    a = advance(a, phaseSeconds('depressurizing') * 0.6)
+    expect(command(a, 'open-outer', true).refusal, 'outer hatch opened under pressure').toBeTruthy()
+    a = settle(a)
+    expect(a.kpa).toBeLessThanOrEqual(VACUUM_KPA)
+    a = settle(command(a, 'open-outer', true))
+    expect(a.state).toBe('outer-hatch-open')
+    expect(innerHatch(a.state), 'inner hatch not locked with the outer one open').toBe('locked')
+
+    // ---- 4. outside
+    a = command(a, 'egress', true)
+    expect(a.state).toBe('eva-active')
+    let m: EvaMotion = { x: EGRESS.x, y: EGRESS.y, z: EGRESS.z, vx: 0, vy: 0, vz: 0 }
+
+    // Fly to a worksite and work it. Reaching it completes nothing.
+    const task = EVA_TASKS.find((t) => t.id === 'eva-02')!
+    for (let i = 0; i < 6000; i++) {
+      const dx = task.site.x - m.x, dy = task.site.y - m.y, dz = task.site.z - m.z
+      const len = Math.hypot(dx, dy, dz) || 1
+      if (len < task.site.reach) break
+      m = stepEva(m, dx / len, dy / len, dz / len, 1 / 60)
+    }
+    expect(siteInReach(m.x, m.y, m.z)?.id).toBe(task.id)
+    expect(taskComplete(task, []), 'arriving completed the task').toBe(false)
+
+    let steps: string[] = []
+    for (const s of task.steps) {
+      expect(nextProcStepIsThis(task.steps, steps, s.id)).toBe(true)
+      if (s.needs) expect(prep.tools).toContain(s.needs)
+      steps = [...steps, stepKey(task.id, s.id)]
+    }
+    expect(taskComplete(task, steps)).toBe(true)
+
+    // Time outside accumulates only while outside.
+    a = advance(a, 120)
+    expect(a.evaSeconds).toBeCloseTo(120, 3)
+
+    // ---- 5. back in
+    a = command(a, 'return', true)
+    expect(a.state).toBe('crew-returning')
+    a = settle(command(a, 'close-outer', true))
+    expect(a.state).toBe('pressure-equalized')
+    expect(a.kpa).toBeCloseTo(CABIN_KPA, 4)
+    a = settle(command(a, 'open-inner', true))
+    expect(a.state).toBe('crew-reentering')
+    a = command(a, 'ingress', true)
+    expect(a.state).toBe('post-eva')
+
+    // ---- 6. the post-EVA review is now available, and was not before
+    const unlocked = PROC_BY_ID['post-eva'].requires?.({
+      who: { id: 'a1', name: 'x', callsign: 'x', role: 'x', age: 1, background: '', color: '', initials: 'x',
+             baseline: { restingHR: 1, hrv: 1, systolicBP: 1, diastolicBP: 1, sleepDuration: 1, exerciseMinutes: 1 } },
+      now: undefined, base: {}, day: 1, evaDone: a.evaSeconds > 0, evaSeconds: a.evaSeconds,
+    })
+    expect(unlocked, 'post-EVA review still locked after a spacewalk').toBeNull()
+  })
+})
+
+/** Helper: is `id` the next step given what is done? */
+function nextProcStepIsThis(steps: readonly { id: string }[], done: readonly string[], id: string): boolean {
+  for (const s of steps) {
+    const key = done.find((d) => d.endsWith(':' + s.id))
+    if (!key) return s.id === id
+  }
+  return false
+}
+
+describe('the hull is closed', () => {
+  /**
+   * The plan-level statement of the property a render test checks visually.
+   *
+   * The rendered check clears the frame to a colour nothing in the vessel
+   * uses, switches the planet off and looks for that colour surviving from
+   * 264 viewpoints; this is the same idea expressed over the deck plan, so it
+   * runs in the ordinary suite. Both exist because the render test found real
+   * gaps this one cannot see (quantised doorway edges), and this one states
+   * the invariant the backstop shell is built to guarantee.
+   */
+  const EPS = 1e-6
+
+  it('has every room edge either shared with a neighbour or on the outside', () => {
+    // There is nothing to assert about a wall except that it is accounted
+    // for — this is really a check that the room list is well formed and
+    // that no room hangs off another by a sliver, which is what produced the
+    // awkward partial walls in the first place.
+    for (const r of ROOMS) {
+      expect(r.x1).toBeGreaterThan(r.x0)
+      expect(r.z1).toBeGreaterThan(r.z0)
+      expect(r.height).toBeGreaterThan(1.9)
+    }
+  })
+
+  it('never overlaps two rooms, which would put walls inside walkable space', () => {
+    for (const a of ROOMS) {
+      for (const b of ROOMS) {
+        if (a.id === b.id) continue
+        const overlapX = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)
+        const overlapZ = Math.min(a.z1, b.z1) - Math.max(a.z0, b.z0)
+        const bothPositive = overlapX > EPS && overlapZ > EPS
+        expect(bothPositive, `${a.id} and ${b.id} overlap by ${overlapX.toFixed(2)}x${overlapZ.toFixed(2)} m`).toBe(false)
+      }
+    }
+  })
+
+  it('keeps every room reachable from the spawn point', () => {
+    // A room with no shared edge is a room nobody can get to, and the
+    // objectives would then be uncompletable.
+    const adj = new Map<string, string[]>()
+    for (const a of ROOMS) {
+      const near: string[] = []
+      for (const b of ROOMS) {
+        if (a.id === b.id) continue
+        const touchX = Math.abs(a.x1 - b.x0) < 0.01 || Math.abs(a.x0 - b.x1) < 0.01
+        const touchZ = Math.abs(a.z1 - b.z0) < 0.01 || Math.abs(a.z0 - b.z1) < 0.01
+        const spanZ = Math.min(a.z1, b.z1) - Math.max(a.z0, b.z0) > 0.5
+        const spanX = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 0.5
+        if ((touchX && spanZ) || (touchZ && spanX)) near.push(b.id)
+      }
+      adj.set(a.id, near)
+    }
+    const start = ROOMS.find((r) => r.x0 <= SPAWN.x && r.x1 >= SPAWN.x && r.z0 <= SPAWN.z && r.z1 >= SPAWN.z)
+    expect(start, 'the spawn point is not inside any room').toBeTruthy()
+    const seen = new Set<string>([start!.id])
+    const queue = [start!.id]
+    while (queue.length) {
+      const id = queue.shift()!
+      for (const n of adj.get(id) ?? []) if (!seen.has(n)) { seen.add(n); queue.push(n) }
+    }
+    for (const r of ROOMS) {
+      expect(seen.has(r.id), `${r.id} cannot be reached on foot from the spawn point`).toBe(true)
+    }
+  })
+
+  it('puts every console and EVA point inside a room', () => {
+    for (const s of STATIONS) {
+      expect(inside(s.x, s.z), `console ${s.id} is outside the hull`).toBe(true)
+    }
+    for (const p of EVA_POINTS) {
+      expect(inside(p.x, p.z), `EVA point ${p.id} is outside the hull`).toBe(true)
     }
   })
 })

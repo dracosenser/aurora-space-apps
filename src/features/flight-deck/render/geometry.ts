@@ -1,4 +1,4 @@
-import { CUPOLA, DOORS, ROOMS, STATIONS, inside, type Room } from '../model/deck'
+import { CUPOLA, DOORS, ROOMS, STATIONS, heightAt, inside, type Room } from '../model/deck'
 import { FIXTURES, FIXTURE_RANGE2, attenuation } from './fixtures'
 import {
   airlockChamber, auxComputers, cableRuns, commandArea, environmentRack, evaPrepRoom,
@@ -138,6 +138,103 @@ export class Builder {
 /** The axis a module runs on. */
 export function axisOf(r: Room): 'x' | 'z' {
   return r.along ?? (r.z1 - r.z0 >= r.x1 - r.x0 ? 'z' : 'x')
+}
+
+/**
+ * A plain closed skin just outside the detailed interior.
+ *
+ * The detailed walls are assembled from bays, chamfers, collars and end
+ * bulkheads, each of which has to decide for itself where a doorway begins.
+ * Every one of those decisions is a chance to leave a sliver uncovered, and
+ * because the vessel has nothing behind its walls, a sliver is a view of
+ * space. Successive rounds of finer sampling kept shrinking those slivers
+ * without eliminating them, which is the signature of a problem that wants a
+ * different kind of answer rather than more of the same one.
+ *
+ * So this builds a second, featureless shell a few centimetres outside the
+ * first, and it is derived rather than sampled: the rooms are axis-aligned
+ * rectangles, so the part of a room's edge that is genuinely exterior is the
+ * edge minus the spans shared with its neighbours, which is exact interval
+ * arithmetic and cannot miss by a fraction of a sample.
+ *
+ * It is never meant to be seen. When it is seen, it reads as an unlit interior
+ * surface rather than as a hole, which is the right failure.
+ */
+function backstopShell(b: Builder): void {
+  const OUT = 0.06
+  const DARK: Rgb = [0.09, 0.093, 0.10]
+  const MAT: Mat = [0.95, 0, 1]
+
+  for (const r of ROOMS) {
+    const h = r.height
+    // Deck and deck-head, over the whole rectangle rather than inset by the
+    // chamfer the detailed version uses.
+    b.quad(
+      [r.x0 - OUT, -OUT, r.z0 - OUT], [r.x1 + OUT, -OUT, r.z0 - OUT],
+      [r.x1 + OUT, -OUT, r.z1 + OUT], [r.x0 - OUT, -OUT, r.z1 + OUT], DARK, MAT,
+    )
+    b.quad(
+      [r.x0 - OUT, h + OUT, r.z1 + OUT], [r.x1 + OUT, h + OUT, r.z1 + OUT],
+      [r.x1 + OUT, h + OUT, r.z0 - OUT], [r.x0 - OUT, h + OUT, r.z0 - OUT], DARK, MAT,
+    )
+
+    // The four walls, each minus whatever a neighbouring room occupies.
+    for (const side of ['x0', 'x1', 'z0', 'z1'] as const) {
+      const vertical = side === 'x0' || side === 'x1'
+      const at = side === 'x0' ? r.x0 - OUT : side === 'x1' ? r.x1 + OUT : side === 'z0' ? r.z0 - OUT : r.z1 + OUT
+      const probe = side === 'x0' ? r.x0 - 0.2 : side === 'x1' ? r.x1 + 0.2 : side === 'z0' ? r.z0 - 0.2 : r.z1 + 0.2
+      const lo = vertical ? r.z0 - OUT : r.x0 - OUT
+      const hi = vertical ? r.z1 + OUT : r.x1 + OUT
+
+      // Spans of this edge that must stay open.
+      //
+      // Two kinds: the stretch another room sits against, and the deliberate
+      // apertures — the cupola and the hatch onto vacuum. The backstop is a
+      // backstop, not a hull, and it has no business closing a window. Adding
+      // it without this turned the cupola black, which is the sort of fix
+      // that is worse than the bug it was for.
+      const covered: [number, number][] = []
+      if (r.id === 'command' && side === 'z1') {
+        covered.push([CUPOLA.x - CUPOLA.radius - 0.4, CUPOLA.x + CUPOLA.radius + 0.4])
+      }
+      for (const d of DOORS) {
+        const onThisWall =
+          (vertical && d.axis === 'x' && Math.abs(d.at - (side === 'x0' ? r.x0 : r.x1)) < 0.01) ||
+          (!vertical && d.axis === 'z' && Math.abs(d.at - (side === 'z0' ? r.z0 : r.z1)) < 0.01)
+        if (onThisWall) covered.push([d.lo - 0.15, d.hi + 0.15])
+      }
+      for (const o of ROOMS) {
+        if (o === r) continue
+        const oLo = vertical ? o.z0 : o.x0
+        const oHi = vertical ? o.z1 : o.x1
+        const oNear = vertical ? o.x0 : o.z0
+        const oFar = vertical ? o.x1 : o.z1
+        if (probe < oNear || probe > oFar) continue
+        const s = Math.max(lo, oLo)
+        const e = Math.min(hi, oHi)
+        if (e > s) covered.push([s, e])
+      }
+      covered.sort((p, q) => p[0] - q[0])
+
+      // The complement: what is left is genuinely the outside.
+      let cursor = lo
+      const spans: [number, number][] = []
+      for (const [s, e] of covered) {
+        if (s > cursor) spans.push([cursor, s])
+        cursor = Math.max(cursor, e)
+      }
+      if (cursor < hi) spans.push([cursor, hi])
+
+      for (const [s, e] of spans) {
+        if (e - s < 1e-6) continue
+        if (vertical) {
+          b.quad([at, -OUT, s], [at, h + OUT, s], [at, h + OUT, e], [at, -OUT, e], DARK, MAT)
+        } else {
+          b.quad([s, -OUT, at], [s, h + OUT, at], [e, h + OUT, at], [e, -OUT, at], DARK, MAT)
+        }
+      }
+    }
+  }
 }
 
 /** Deterministic, so the vessel is identical on every load. */
@@ -338,10 +435,30 @@ function moduleShell(b: Builder, r: Room, along: 'x' | 'z'): void {
     const mid = (t0 + t1) / 2
     const seed = i * 13.7 + (along === 'z' ? 0 : 91)
 
-    const lo = W(mid, w0 - 0.4, 1)
-    const hi = W(mid, w1 + 0.4, 1)
-    const openLo = inside(lo[0], lo[2])
-    const openHi = inside(hi[0], hi[2])
+    /**
+     * How much of this bay, on each side, opens into another compartment.
+     *
+     * Sampled along the bay rather than once at its midpoint. A midpoint test
+     * makes every doorway a whole number of bays wide, so wherever the room
+     * beyond starts or stops part way along one — which, with rooms placed on
+     * a plan and bays placed by dividing a module into equal parts, is most of
+     * them — the leftover slice of bay was left out and you could see space
+     * through the gap. The hull-integrity test found 86 views out of 264 with
+     * one before this.
+     */
+    // 24 samples over a ~1.08 m bay resolves a doorway edge to about 45 mm,
+    // which is below the width of the jamb that covers it. At 8 the residue
+    // was still a visible slot in half a dozen views.
+    const SUB = 24
+    const sideOpen: [boolean[], boolean[]] = [[], []]
+    for (let k = 0; k < SUB; k++) {
+      const t = t0 + (bayLen * (k + 0.5)) / SUB
+      const pLo = W(t, w0 - 0.4, 1)
+      const pHi = W(t, w1 + 0.4, 1)
+      sideOpen[0].push(inside(pLo[0], pLo[2]))
+      sideOpen[1].push(inside(pHi[0], pHi[2]))
+    }
+    void mid
 
     // Deck: structural panels with a grated centre run and seam rails.
     b.quad(W(t0, w0 + c, 0), W(t1, w0 + c, 0), W(t1, w1 - c, 0), W(t0, w1 - c, 0), FLOORPAN, M_FLOOR)
@@ -374,12 +491,42 @@ function moduleShell(b: Builder, r: Room, along: 'x' | 'z'): void {
       b.quad(W(t0, wEdge, h - c), W(t1, wEdge, h - c), W(t1, wIn, h), W(t0, wIn, h), ALLOY, [0.5, 0.4, 1])
     }
 
-    // Side walls: rack bays, except where the bay is a doorway.
+    // Side walls: rack bays over whatever part of the bay is not a doorway.
     for (const side of [-1, 1] as const) {
-      if (side < 0 ? openLo : openHi) continue
+      const flags = side < 0 ? sideOpen[0] : sideOpen[1]
+      if (flags.every((o) => o)) continue
       const wEdge = side < 0 ? w0 : w1
-      const place = (u: number, hh: number, out: number): P3 => W(t0 + u, wEdge - side * out, c + hh)
-      rackFace(b, place, bayLen, h - 2 * c, seed + (side < 0 ? 0 : 41))
+
+      // Contiguous runs of closed samples become wall.
+      let runStart: number | null = null
+      for (let k = 0; k <= SUB; k++) {
+        const closed = k < SUB && !flags[k]
+        if (closed && runStart === null) runStart = k
+        if (!closed && runStart !== null) {
+          // Each wall run is grown a couple of centimetres into the opening it
+          // abuts. Butting two surfaces edge to edge leaves a seam a pixel or
+          // two wide at a grazing angle — which, when what is behind it is
+          // space, reads as a crack of starlight down the doorway. The overlap
+          // is hidden under the jamb.
+          const OVER = 0.022
+          const f0 = (bayLen * runStart) / SUB - (runStart > 0 ? OVER : 0)
+          const f1 = (bayLen * k) / SUB + (k < SUB ? OVER : 0)
+          const place = (u: number, hh: number, out: number): P3 =>
+            W(t0 + f0 + u, wEdge - side * out, c + hh)
+          rackFace(b, place, f1 - f0, h - 2 * c, seed + (side < 0 ? 0 : 41) + runStart * 3.1)
+          // A jamb where the wall meets an opening, so the wall has thickness
+          // rather than ending in a paper edge.
+          for (const [at, open] of [[f0, runStart > 0], [f1, k < SUB]] as const) {
+            if (!open) continue
+            // A box rather than a quad: at a grazing angle a zero-thickness
+            // jamb can vanish between two pixels and let the seam through.
+            const j0 = W(t0 + at - 0.012, wEdge, 0)
+            const j1 = W(t0 + at + 0.012, wEdge - side * 0.3, h)
+            b.box(j0[0], j0[1], j0[2], j1[0], j1[1], j1[2], PEACH_DK, M_PANEL)
+          }
+          runStart = null
+        }
+      }
     }
   }
 
@@ -389,9 +536,93 @@ function moduleShell(b: Builder, r: Room, along: 'x' | 'z'): void {
   // end is skipped because the cupola bulkhead is built separately.
   for (const end of [a0, a1] as const) {
     const outward = end === a0 ? -1 : 1
-    const probe = W(end + outward * 0.4, wc, 1)
-    if (inside(probe[0], probe[2])) continue
     if (r.id === 'command' && end === a1) continue
+
+    // How much of this end actually opens into somewhere else.
+    //
+    // This used to be one probe at the centre of the wall, which assumed the
+    // compartment beyond is at least as wide as this one. The command module
+    // is eleven metres across and opens onto a spine four and a half metres
+    // wide: the centre probe found the spine, the whole bulkhead was skipped,
+    // and the three metres either side of the doorway were a hole you could
+    // see space through. Sampling across the width instead gives the spans
+    // that need wall and the span that does not.
+    const SAMPLES = 48
+    const open: boolean[] = []
+    for (let i = 0; i < SAMPLES; i++) {
+      const u = w0 + ((w1 - w0) * (i + 0.5)) / SAMPLES
+      const p = W(end + outward * 0.4, u, 1)
+      open.push(inside(p[0], p[2]))
+    }
+    // The compartment beyond may also be shorter than this one. `inside` is a
+    // plan test and knows nothing about height, so an opening built to this
+    // module's full height leaves a strip above the doorway open wherever the
+    // next module has a lower deck-head — which is exactly the case between
+    // the command module at 3.3 m and the spine at 2.75 m.
+    let beyondH = h
+    for (let i = 0; i < SAMPLES; i++) {
+      if (!open[i]) continue
+      const u = w0 + ((w1 - w0) * (i + 0.5)) / SAMPLES
+      const p = W(end + outward * 0.4, u, 1)
+      beyondH = Math.min(beyondH, heightAt(p[0], p[2]))
+    }
+    if (beyondH < h - 0.01) {
+      // A header across the opening, from the lower deck-head up to this one,
+      // with a return so it reads as structure rather than as a painted line.
+      const o0 = open.findIndex((o) => o)
+      const o1 = open.length - 1 - [...open].reverse().findIndex((o) => o)
+      if (o0 >= 0) {
+        const s0 = w0 + ((w1 - w0) * o0) / SAMPLES
+        const s1 = w0 + ((w1 - w0) * (o1 + 1)) / SAMPLES
+        b.quad(W(end, s0 - 0.03, beyondH - 0.02), W(end, s1 + 0.03, beyondH - 0.02), W(end, s1 + 0.03, h), W(end, s0 - 0.03, h), PANEL_2, M_PANEL)
+        const g0 = W(end, s0 - 0.03, beyondH - 0.02)
+        const g1 = W(end - outward * 0.34, s1 + 0.03, beyondH)
+        b.box(g0[0], g0[1], g0[2], g1[0], g1[1], g1[2], PEACH_DK, M_PANEL)
+      }
+    }
+
+    if (open.every((o) => o)) continue
+    const solid: [number, number][] = []
+    let runStart: number | null = null
+    for (let i = 0; i <= SAMPLES; i++) {
+      const isSolid = i < SAMPLES && !open[i]
+      if (isSolid && runStart === null) runStart = i
+      if (!isSolid && runStart !== null) {
+        solid.push([
+          w0 + ((w1 - w0) * runStart) / SAMPLES,
+          w0 + ((w1 - w0) * i) / SAMPLES,
+        ])
+        runStart = null
+      }
+    }
+    if (solid.length > 1 || (solid.length === 1 && (solid[0][0] > w0 + 0.01 || solid[0][1] < w1 - 0.01))) {
+      // A partial end: wall either side of an opening. Each span gets a face,
+      // a return into the opening so the wall reads as having thickness, and
+      // rack panels where there is room for them.
+      for (const [rawS0, rawS1] of solid) {
+        // Same overlap as the bay walls, for the same reason.
+        const OVER = 0.022
+        const s0 = rawS0 > w0 + 0.01 ? rawS0 - OVER : rawS0
+        const s1 = rawS1 < w1 - 0.01 ? rawS1 + OVER : rawS1
+        b.quad(W(end, s0, 0), W(end, s1, 0), W(end, s1, h), W(end, s0, h), PANEL_2, M_PANEL)
+        for (const edge of [s0, s1]) {
+          if (edge <= w0 + 0.01 || edge >= w1 - 0.01) continue
+          const e0 = W(end, edge - 0.014, 0)
+          const e1 = W(end - outward * 0.34, edge + 0.014, h)
+          b.box(e0[0], e0[1], e0[2], e1[0], e1[1], e1[2], PEACH_DK, M_PANEL)
+        }
+        if (s1 - s0 < 0.7) continue
+        const n2 = Math.max(1, Math.round((s1 - s0) / 1.1))
+        const pw2 = (s1 - s0) / n2
+        for (let k = 0; k < n2; k++) {
+          const u0 = s0 + k * pw2
+          const place = (u: number, hh: number, out: number): P3 =>
+            W(end + outward * out, u0 + (outward > 0 ? u : pw2 - u), c + hh)
+          rackFace(b, place, pw2, h - 2 * c, 407 + k * 7.3 + (end === a0 ? 0 : 53))
+        }
+      }
+      continue
+    }
 
     // A hatch in this wall leads somewhere there is no room on the other side
     // of — the outer hatch opens onto vacuum — so the opening has to be cut
@@ -465,11 +696,18 @@ function hatchCollar(b: Builder, axis: 'x' | 'z', at: number, across0: number, a
   const W = (u: number, y: number, t: number): P3 => (axis === 'z' ? [u, y, t] : [t, y, u])
   const b2 = 0.24
 
+  // The frame runs from the deck to the deck-head rather than stopping a
+  // little above the opening. A collar that stops short leaves the module's
+  // chamfered ceiling corner uncovered either side of it, and since what is
+  // behind that corner is nothing, the gap showed as a triangle of space —
+  // which is what the hull-integrity test kept finding after the doorways
+  // themselves were fixed. A bulkhead with a hatch in it goes wall to wall
+  // anyway, so this is also the more honest shape.
   const segs: [number, number, number, number][] = [
-    [cx - halfW - b2, y0 - b2, cx - halfW, y1 + b2],
-    [cx + halfW, y0 - b2, cx + halfW + b2, y1 + b2],
-    [cx - halfW, y1, cx + halfW, y1 + b2],
-    [cx - halfW, y0 - b2, cx + halfW, y0],
+    [cx - halfW - b2, 0, cx - halfW, h],
+    [cx + halfW, 0, cx + halfW + b2, h],
+    [cx - halfW, y1, cx + halfW, h],
+    [cx - halfW, 0, cx + halfW, y0],
   ]
   for (const [u0, v0, u1, v1] of segs) {
     b.quad(W(u0, v0, at - d), W(u0, v1, at - d), W(u1, v1, at - d), W(u1, v0, at - d), PEACH, M_PANEL)
@@ -635,6 +873,23 @@ export function buildEmissive(): MeshData {
  * sampled where the shut hatch sits, which is where a leaf spends almost all
  * of its time and all of the time anyone is looking at it closely.
  */
+/**
+ * The backstop, as its own mesh.
+ *
+ * Kept out of the structure buffer so it can be drawn last, after the detailed
+ * interior has laid down depth, and with a shader that does nothing but output
+ * a colour. Both matter: it is a surface that is almost never visible, and
+ * putting it through the full lighting path cost real time for pixels that are
+ * thrown away. Measured at 2129 ms against 1778 ms for the same view before it
+ * existed — about a fifth of the frame, to guarantee something a viewer should
+ * never see.
+ */
+export function buildBackstop(): MeshData {
+  const b = new Builder()
+  backstopShell(b)
+  return b.data()
+}
+
 export function buildHatches(): MeshData {
   const b = new Builder()
   hatchLeaf(b, 1.8, 2.0)

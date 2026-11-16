@@ -493,6 +493,25 @@ void main() {
   outColor = vec4(col, 1.0);
 }`
 
+// ----------------------------------------------------------- backstop
+/**
+ * The backstop's shader: a flat colour and nothing else.
+ *
+ * No lighting, no material, no detail. The surface exists to be behind
+ * everything else, so the only thing that matters about it is that it is not
+ * a hole, and anything more elaborate is time spent on pixels that the
+ * interior covers.
+ */
+export const BACKSTOP_VERT = /* glsl */ `#version 300 es
+layout(location = 0) in vec3 aPos;
+uniform mat4 uViewProj;
+void main() { gl_Position = uViewProj * vec4(aPos, 1.0); }`
+
+export const BACKSTOP_FRAG = /* glsl */ `#version 300 es
+precision mediump float;
+out vec4 outColor;
+void main() { outColor = vec4(0.055, 0.057, 0.062, 1.0); }`
+
 // --------------------------------------------------------- sky composite
 /**
  * Puts the offscreen planet onto the frame.
