@@ -6,7 +6,7 @@ import { launchedRun, minViewDay } from '../sim/launch'
 import { assess } from '../sim/assess'
 import { detectAnomalies } from '../lib/anomaly'
 import { computeStatus, crewScore, withAssessment, type AstronautStatus } from '../lib/health'
-import { EMPTY_LOG, batteryComplete, newlyEarned, pointsForReading, type CrewLog, pointsForVeilStep } from '../lib/gamify'
+import { EMPTY_LOG, batteryComplete, clearedKey, newlyEarned, pointsForReading, type CrewLog, pointsForVeilStep } from '../lib/gamify'
 import type { CheckId } from '../data/selfcheck'
 
 /**
@@ -81,9 +81,9 @@ export interface MissionState extends PersistedState {
   setLastScenario: (p: ScenarioParams | null) => void
   setChat: (fn: (prev: AssistantMessage[]) => AssistantMessage[]) => void
   setTourSeen: (v: boolean) => void
-  /** Record a self-taken reading for the current mission day. */
+  /** Record a self-taken reading for the selected crew member on the current mission day. */
   logReading: (id: CheckId, value: number) => void
-  /** Mark a protocol cleared for the current mission day. */
+  /** Mark a protocol cleared by the selected crew member on the current mission day. */
   clearProtocol: (id: string) => void
   /** Bank SIGNAL VEIL steps onto the shared score and patch board. */
   recordVeilProgress: (steps: string[]) => void
@@ -174,15 +174,16 @@ export function MissionProvider({ children, records, missionKey }: { children: R
     logReading: (id, raw) =>
       setState((s) => {
         const day = s.viewDay
+        const who = s.selectedAstronautId
         const value = Number(raw)
-        if (!Number.isFinite(value)) return s
+        if (!Number.isFinite(value) || !who) return s
         const at = Date.now()
 
-        const readings = [...s.log.readings.filter((r) => !(r.id === id && r.day === day)), { id, value, day, at }]
+        const readings = [...s.log.readings.filter((r) => !(r.id === id && r.day === day && r.astronautId === who)), { id, value, day, at, astronautId: who }]
         let next: CrewLog = { ...s.log, readings, points: s.log.points + pointsForReading(id, value) }
 
-        // Completing the battery advances the streak exactly once per day
-        if (batteryComplete(next, day) && next.lastBatteryDay !== day) {
+        // The first complete battery of a day advances the crew's streak exactly once
+        if (batteryComplete(next, day, who) && next.lastBatteryDay !== day) {
           const consecutive = next.lastBatteryDay === day - 1
           next = {
             ...next,
@@ -190,11 +191,11 @@ export function MissionProvider({ children, records, missionKey }: { children: R
             batteriesLogged: next.batteriesLogged + 1,
             streak: consecutive ? next.streak + 1 : 1,
             points: next.points + 50,
-            cleared: { ...next.cleared, battery: day },
+            cleared: { ...next.cleared, [clearedKey(who, 'battery')]: day },
           }
         }
 
-        const earned = newlyEarned(next, day)
+        const earned = newlyEarned(next, day, who)
         if (earned.length) next = { ...next, patches: [...next.patches, ...earned], points: next.points + earned.length * 40 }
         if (!next.periodOpenedAt) next = { ...next, periodOpenedAt: at }
         return { ...s, log: next }
@@ -203,15 +204,17 @@ export function MissionProvider({ children, records, missionKey }: { children: R
     clearProtocol: (id) =>
       setState((s) => {
         const day = s.viewDay
-        if (s.log.cleared[id] === day) return s
+        const who = s.selectedAstronautId
+        const key = clearedKey(who, id)
+        if (!who || s.log.cleared[key] === day) return s
         const pts = { battery: 50, resistive: 35, aerobic: 25, hydration: 15, shelter: 30, conference: 20 }[id] ?? 10
         let next: CrewLog = {
           ...s.log,
-          cleared: { ...s.log.cleared, [id]: day },
+          cleared: { ...s.log.cleared, [key]: day },
           points: s.log.points + pts,
           periodOpenedAt: s.log.periodOpenedAt || Date.now(),
         }
-        const earned = newlyEarned(next, day)
+        const earned = newlyEarned(next, day, who)
         if (earned.length) next = { ...next, patches: [...next.patches, ...earned], points: next.points + earned.length * 40 }
         return { ...s, log: next }
       }),
@@ -228,7 +231,7 @@ export function MissionProvider({ children, records, missionKey }: { children: R
           points: s.log.points + gained,
           periodOpenedAt: s.log.periodOpenedAt || Date.now(),
         }
-        const earned = newlyEarned(next, s.viewDay)
+        const earned = newlyEarned(next, s.viewDay, s.selectedAstronautId)
         if (earned.length) next = { ...next, patches: [...next.patches, ...earned], points: next.points + earned.length * 40 }
         return { ...s, log: next }
       }),

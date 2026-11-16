@@ -123,7 +123,7 @@ export const PATCH_BY_ID = Object.fromEntries(PATCHES.map((p) => [p.id, p])) as 
 /** The crew member's own log — persisted, and reset with the demo. */
 export interface CrewLog {
   readings: Reading[]
-  /** protocol id → mission day it was last cleared on. */
+  /** `${astronautId}:${protocolId}` → mission day it was last cleared on. */
   cleared: Record<string, number>
   streak: number
   lastBatteryDay: number | null
@@ -151,25 +151,34 @@ export const EMPTY_LOG: CrewLog = {
 /** How long a duty period runs, in real milliseconds. */
 export const PERIOD_MS = 15 * 60 * 1000
 
-/** Readings taken for a given mission day, newest wins. */
-export function readingsForDay(log: CrewLog, day: number): Partial<Record<CheckId, Reading>> {
+/** Key of a protocol cleared by one crew member. */
+export function clearedKey(astronautId: string, protocolId: string): string {
+  return `${astronautId}:${protocolId}`
+}
+
+export function isCleared(log: CrewLog, astronautId: string, protocolId: string, day: number): boolean {
+  return log.cleared[clearedKey(astronautId, protocolId)] === day
+}
+
+/** One crew member's readings for a mission day, newest wins. */
+export function readingsForDay(log: CrewLog, day: number, astronautId: string): Partial<Record<CheckId, Reading>> {
   const out: Partial<Record<CheckId, Reading>> = {}
   for (const r of log.readings) {
-    if (r.day !== day) continue
+    if (r.day !== day || r.astronautId !== astronautId) continue
     const prev = out[r.id]
     if (!prev || r.at > prev.at) out[r.id] = r
   }
   return out
 }
 
-export function batteryComplete(log: CrewLog, day: number): boolean {
-  const taken = readingsForDay(log, day)
+export function batteryComplete(log: CrewLog, day: number, astronautId: string): boolean {
+  const taken = readingsForDay(log, day, astronautId)
   return CHECKS.every((c) => taken[c.id] !== undefined)
 }
 
 /** Worst band present in the day's readings, for the at-a-glance colour. */
-export function worstBand(log: CrewLog, day: number): Band | null {
-  const taken = readingsForDay(log, day)
+export function worstBand(log: CrewLog, day: number, astronautId: string): Band | null {
+  const taken = readingsForDay(log, day, astronautId)
   let worst: Band | null = null
   for (const c of CHECKS) {
     const r = taken[c.id]
@@ -182,52 +191,40 @@ export function worstBand(log: CrewLog, day: number): Band | null {
   return worst
 }
 
-export interface Readiness {
-  score: number
-  band: Band
-  /** Plain-language reasons, best first. */
-  drivers: string[]
+/** Points a logged reading costs the check-in score, by band. */
+export const CHECKIN_POINTS: Record<Band, number> = { nominal: 0, watch: 10, caution: 30 }
+
+export interface CheckIn {
+  /** 100 minus the points lost to readings outside their reference band; null before any reading. */
+  score: number | null
+  /** The worst band among the logged readings: one reading in caution puts the check-in in caution. */
+  band: Band | null
+  logged: number
+  total: number
+  /** Readings outside the reference band, worst first. */
+  offBand: { id: CheckId; label: string; value: number; decimals: number; unit: string; band: Band; points: number }[]
 }
 
 /**
- * Crew readiness for the current duty period: how much of the protocol board
- * is cleared, weighted by how the day's readings came back. This is an
- * engagement score for the simulation — it is not a medical assessment.
+ * The check-in for one crew member on one day, from their own readings only.
+ * How many readings were logged is reported separately and never changes the
+ * score, so taking more measurements cannot make anyone look healthier.
  */
-export function computeReadiness(log: CrewLog, day: number): Readiness {
-  const taken = readingsForDay(log, day)
-  const logged = CHECKS.filter((c) => taken[c.id] !== undefined).length
-  const coverage = logged / CHECKS.length
-
-  let bandPenalty = 0
-  const offBand: string[] = []
+export function checkIn(log: CrewLog, day: number, astronautId: string): CheckIn {
+  const taken = readingsForDay(log, day, astronautId)
+  const offBand: CheckIn['offBand'] = []
+  let logged = 0
   for (const c of CHECKS) {
     const r = taken[c.id]
     if (!r) continue
-    const b = bandFor(c, r.value)
-    if (b === 'watch') {
-      bandPenalty += 4
-      offBand.push(`${c.short} in watch band`)
-    } else if (b === 'caution') {
-      bandPenalty += 11
-      offBand.push(`${c.short} needs attention`)
-    }
+    logged++
+    const band = bandFor(c, r.value)
+    if (band !== 'nominal') offBand.push({ id: c.id, label: c.label, value: r.value, decimals: c.decimals, unit: c.unit, band, points: CHECKIN_POINTS[band] })
   }
-
-  const clearedCount = PROTOCOLS.filter((p) => log.cleared[p.id] === day).length
-  const boardShare = clearedCount / PROTOCOLS.length
-
-  const raw = 32 + coverage * 38 + boardShare * 30 - bandPenalty
-  const score = Math.max(0, Math.min(100, Math.round(raw)))
-  const band: Band = score >= 78 ? 'nominal' : score >= 55 ? 'watch' : 'caution'
-
-  const drivers: string[] = []
-  if (logged < CHECKS.length) drivers.push(`${CHECKS.length - logged} of ${CHECKS.length} readings still outstanding`)
-  drivers.push(...offBand.slice(0, 3))
-  if (clearedCount < PROTOCOLS.length) drivers.push(`${PROTOCOLS.length - clearedCount} protocols still open on the board`)
-  if (!drivers.length) drivers.push('Board clear and every reading in band')
-
-  return { score, band, drivers }
+  offBand.sort((a, b) => b.points - a.points)
+  if (!logged) return { score: null, band: null, logged, total: CHECKS.length, offBand }
+  const lost = offBand.reduce((s, x) => s + x.points, 0)
+  return { score: Math.max(0, 100 - lost), band: worstBand(log, day, astronautId), logged, total: CHECKS.length, offBand }
 }
 
 /** Points for a single logged reading, including the in-band bonus. */
@@ -237,18 +234,18 @@ export function pointsForReading(id: CheckId, value: number): number {
 }
 
 /** Patches the log has earned but not yet been awarded. */
-export function newlyEarned(log: CrewLog, day: number): string[] {
+export function newlyEarned(log: CrewLog, day: number, astronautId: string): string[] {
   const earned: string[] = []
   const has = (id: string) => log.patches.includes(id)
-  const complete = batteryComplete(log, day)
+  const complete = batteryComplete(log, day, astronautId)
 
   if (complete && !has('first-light')) earned.push('first-light')
   if (log.streak >= 3 && !has('steady-state')) earned.push('steady-state')
   if (log.streak >= 7 && !has('no-drift')) earned.push('no-drift')
   if (log.batteriesLogged >= 10 && !has('vigilant')) earned.push('vigilant')
-  if (complete && worstBand(log, day) === 'nominal' && !has('full-sweep')) earned.push('full-sweep')
-  if (log.cleared['shelter'] === day && !has('sheltered')) earned.push('sheltered')
-  if (PROTOCOLS.every((p) => log.cleared[p.id] === day) && !has('all-clear')) earned.push('all-clear')
+  if (complete && worstBand(log, day, astronautId) === 'nominal' && !has('full-sweep')) earned.push('full-sweep')
+  if (isCleared(log, astronautId, 'shelter', day) && !has('sheltered')) earned.push('sheltered')
+  if (PROTOCOLS.every((p) => isCleared(log, astronautId, p.id, day)) && !has('all-clear')) earned.push('all-clear')
 
   const veil = new Set(log.veil)
   if (veil.has('cleared') && !has('visor-clear')) earned.push('visor-clear')

@@ -235,4 +235,6 @@ export interface Reading {
   value: number
   day: number
   at: number
+  /** The crew member the reading was taken for. */
+  astronautId?: string
 }

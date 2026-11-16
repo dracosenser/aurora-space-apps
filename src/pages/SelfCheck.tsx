@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, Crosshair, Timer } from 'lucide-react'
-import { useMission } from '../hooks/useMission'
+import { ASTRONAUTS, useMission } from '../hooks/useMission'
 import { CHECKS, bandFor, type Band, type CheckId, type SystemId } from '../data/selfcheck'
 import { BODY_SYSTEMS, HAZARDS, HAZARD_BY_ID, SYSTEM_BY_ID } from '../data/bodySystems'
 import {
+  CHECKIN_POINTS,
   PATCH_BY_ID,
   PATCHES,
   PROTOCOLS,
-  computeReadiness,
+  checkIn,
   fmtCountdown,
+  isCleared,
   periodRemaining,
   readingsForDay,
 } from '../lib/gamify'
+import { assess } from '../sim/assess'
+import { launchedRun } from '../sim/launch'
+import type { SimIndicator } from '../sim/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
@@ -30,10 +35,41 @@ const BAND_VAR: Record<Band, string> = {
   caution: 'var(--danger)',
 }
 
+/** The simulated indicator each self-taken reading corresponds to (glucose is not simulated). */
+const SIM_OF: Partial<Record<CheckId, SimIndicator>> = {
+  systolic: 'systolicBP',
+  diastolic: 'diastolicBP',
+  heartRate: 'restingHR',
+  spo2: 'spo2',
+  temperature: 'bodyTemp',
+  sleepHours: 'sleepDuration',
+  mood: 'mood',
+}
+
 export function SelfCheck() {
   const m = useMission()
   const day = m.viewDay
-  const taken = useMemo(() => readingsForDay(m.log, day), [m.log, day])
+  const who = ASTRONAUTS.some((a) => a.id === m.selectedAstronautId) ? m.selectedAstronautId : (ASTRONAUTS[0]?.id ?? '')
+  const person = ASTRONAUTS.find((a) => a.id === who)
+  const taken = useMemo(() => readingsForDay(m.log, day, who), [m.log, day, who])
+
+  // What the launched mission's simulation says about this person today: used to
+  // prefill each reading and to set the logged values against the model.
+  const { config, result } = launchedRun()
+  const run = result.astronauts.find((a) => a.astronautId === who)
+  const simDay = Math.min(result.days, Math.max(1, day))
+  const expected = useMemo(() => {
+    const out: Partial<Record<CheckId, number>> = {}
+    if (!run) return out
+    for (const c of CHECKS) {
+      const k = SIM_OF[c.id]
+      if (!k) continue
+      const v = run.daily[k][simDay - 1]
+      out[c.id] = Math.min(c.max, Math.max(c.min, Math.round(v / c.step) * c.step))
+    }
+    return out
+  }, [run, simDay])
+  const model = useMemo(() => assess(config, result, who, simDay), [config, result, who, simDay])
 
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState<number | null>(null)
@@ -42,7 +78,7 @@ export function SelfCheck() {
 
   const def = CHECKS[step]
   const existing = taken[def.id]
-  const value = draft ?? existing?.value ?? def.seed
+  const value = draft ?? existing?.value ?? expected[def.id] ?? def.seed
   const band = bandFor(def, value)
 
   // The duty-period clock runs on real time, so the window genuinely closes
@@ -51,14 +87,14 @@ export function SelfCheck() {
     return () => window.clearInterval(t)
   }, [])
 
-  // Moving between checks clears the draft so each opens on its own value
-  useEffect(() => setDraft(null), [step])
+  // Moving between checks or crew members clears the draft so each opens on its own value
+  useEffect(() => setDraft(null), [step, who])
 
   const remaining = periodRemaining(m.log.periodOpenedAt, now)
   const periodOpen = m.log.periodOpenedAt > 0
   const expired = periodOpen && remaining === 0
-  const readiness = computeReadiness(m.log, day)
-  const loggedCount = CHECKS.filter((c) => taken[c.id]).length
+  const check = checkIn(m.log, day, who)
+  const loggedCount = check.logged
 
   /** Worst band per system, for the figure's at-a-glance colour. */
   const systemBands = useMemo(() => {
@@ -98,6 +134,34 @@ export function SelfCheck() {
         description="Take your own readings, see what each one means, and act on it. Every measurement here is entered by the crew member — nothing on this page is sensed automatically."
       />
 
+      {/* --------------------------------------------------- who is logging */}
+      <div className="mb-4 border border-border px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="eyebrow-sm mr-1">Logging for</span>
+          {ASTRONAUTS.map((a) => {
+            const n = Object.keys(readingsForDay(m.log, day, a.id)).length
+            const on = a.id === who
+            return (
+              <button
+                key={a.id}
+                onClick={() => m.setSelectedAstronautId(a.id)}
+                aria-pressed={on}
+                className={`flex items-center gap-2 border px-2.5 py-1.5 text-left text-[12px] transition-colors ${on ? 'border-text-strong text-text-strong' : 'border-border text-muted hover:border-border-strong hover:text-text'}`}
+              >
+                <span className="h-2 w-2 shrink-0" style={{ background: a.color }} />
+                <span>{a.name}</span>
+                <span className="annotate">
+                  {n}/{CHECKS.length}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <p className="mt-2 text-[11px] leading-snug text-muted">
+          Readings, protocols and the check-in below belong to {person?.name ?? 'the selected crew member'} on mission day {day}. Each reading opens on the value the simulation predicts for them today; change it to what was actually measured, then log it.
+        </p>
+      </div>
+
       {/* ------------------------------------------------- duty period strip */}
       <div
         className={`mb-8 flex flex-wrap items-center gap-x-6 gap-y-3 border px-4 py-3 transition-colors duration-500 ${
@@ -124,7 +188,7 @@ export function SelfCheck() {
 
         {expired && (
           <span className="annotate text-warn">
-            WINDOW CLOSED — READINESS HELD AT LAST COMPLETE BATTERY
+            WINDOW CLOSED — RESTART THE PERIOD FOR THE NEXT ROUND
           </span>
         )}
 
@@ -254,6 +318,11 @@ export function SelfCheck() {
                 </span>
                 <span className="annotate">{def.max}</span>
               </div>
+              <p className="annotate mt-2">
+                {expected[def.id] !== undefined
+                  ? `MODEL EXPECTS ${expected[def.id]!.toFixed(def.decimals)} ${def.unit} FOR ${(person?.name ?? '').toUpperCase()} ON DAY ${simDay}${existing && Math.abs(existing.value - expected[def.id]!) >= def.step ? ` · LOGGED ${existing.value > expected[def.id]! ? '+' : ''}${(existing.value - expected[def.id]!).toFixed(def.decimals)}` : ''}`
+                  : 'NOT SIMULATED: ENTER THE MEASURED VALUE'}
+              </p>
 
               {/* what it means, and what to do */}
               <div
@@ -311,23 +380,74 @@ export function SelfCheck() {
           {/* readiness instrument */}
           <div className="min-w-0 lg:col-span-5">
             <div className="panel flex flex-col items-center p-5">
-              <ThreeRing
-                value={readiness.score}
-                label="Readiness"
-                status={readiness.band}
-                tone={BAND_VAR[readiness.band]}
-                size={232}
-              />
-              <ul className="mt-4 w-full space-y-1.5 border-t border-border pt-4">
-                {readiness.drivers.map((d) => (
-                  <li key={d} className="flex items-start gap-2 text-[12px] leading-snug text-muted">
-                    <span className="mt-1.5 h-1 w-1 shrink-0 bg-faint" />
-                    {d}
-                  </li>
-                ))}
-              </ul>
+              {check.score === null || !check.band ? (
+                <div className="flex h-[232px] w-full flex-col items-center justify-center text-center">
+                  <p className="eyebrow-sm">Check-in</p>
+                  <p className="mt-2 max-w-60 text-[12px] leading-relaxed text-muted">
+                    No readings logged for {person?.name ?? 'this crew member'} on day {day}. The check-in score appears with the first reading.
+                  </p>
+                </div>
+              ) : (
+                <ThreeRing value={check.score} label="Check-in" status={check.band} tone={BAND_VAR[check.band]} size={232} />
+              )}
+              <div className="mt-4 w-full border-t border-border pt-4">
+                <p className="annotate">
+                  {check.logged}/{check.total} READINGS LOGGED · COVERAGE DOES NOT CHANGE THE SCORE
+                </p>
+                {check.score !== null && (
+                  <ul className="mt-2 space-y-1.5">
+                    {check.offBand.length === 0 ? (
+                      <li className="text-[12px] text-muted">Every logged reading is inside its reference band.</li>
+                    ) : (
+                      check.offBand.map((x) => (
+                        <li key={x.id} className="flex items-start gap-2 text-[12px] leading-snug text-text">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0" style={{ background: BAND_VAR[x.band] }} />
+                          <span className="flex-1">
+                            {x.label}: {x.value.toFixed(x.decimals)} {x.unit} ({x.band})
+                          </span>
+                          <span className="mono text-[11px] text-muted">−{x.points}</span>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                )}
+                <p className="mt-3 text-[11px] leading-snug text-muted">
+                  Check-in = 100 − {CHECKIN_POINTS.watch} per reading in the watch band − {CHECKIN_POINTS.caution} per reading in caution. Its status is the worst single reading, because one reading in caution needs action whatever the others show.
+                </p>
+              </div>
+
+              {model && (
+                <div className="mt-4 w-full border-t border-border pt-4">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="eyebrow-sm">Model readiness · day {model.day}</p>
+                    <span className="mono text-[22px] leading-none" style={{ color: BAND_VAR[model.status] }}>
+                      {model.score}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-snug text-muted">
+                    From {person?.name ?? 'this crew member'}'s simulated mission data over days {model.from}–{model.to}: sleep debt, exercise, strength, bone, vitals, cabin and radiation.
+                  </p>
+                  {model.findings.filter((f) => f.points >= 2).length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {model.findings
+                        .filter((f) => f.points >= 2)
+                        .slice(0, 3)
+                        .map((f) => (
+                          <li key={f.id} className="flex items-start gap-2 text-[12px] leading-snug text-text">
+                            <span className="mt-1.5 h-1 w-1 shrink-0 bg-faint" />
+                            <span className="flex-1">{f.title}</span>
+                            <span className="mono text-[11px] text-muted">−{f.impact.toFixed(1)}</span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                  <Button size="sm" variant="ghost" className="mt-2" onClick={() => m.setPage('medical')}>
+                    Causes and recommendations
+                  </Button>
+                </div>
+              )}
               <p className="annotate mt-4 w-full border-t border-border pt-3">
-                ENGAGEMENT SCORE FOR THIS SIMULATION — NOT A MEDICAL ASSESSMENT
+                REFERENCE BANDS AND A SIMULATION — NOT A MEDICAL ASSESSMENT
               </p>
             </div>
 
@@ -436,12 +556,12 @@ export function SelfCheck() {
 
       {/* --------------------------------------------------- protocol board */}
       <section className="mb-14">
-        <RuledHeading note={`${PROTOCOLS.filter((p) => m.log.cleared[p.id] === day).length}/${PROTOCOLS.length} CLEARED`}>
+        <RuledHeading note={`${(person?.name ?? '').toUpperCase()} · ${PROTOCOLS.filter((p) => isCleared(m.log, who, p.id, day)).length}/${PROTOCOLS.length} CLEARED`}>
           Protocol board
         </RuledHeading>
         <ul className="divide-y divide-border border-y border-border">
           {PROTOCOLS.map((p) => {
-            const done = m.log.cleared[p.id] === day
+            const done = isCleared(m.log, who, p.id, day)
             return (
               <li key={p.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 py-3.5">
                 <span
