@@ -327,6 +327,12 @@ The demonstration is a deterministic, fictional 150-day mission. Every measureme
 
 ---
 
+## Mission Builder and Medical Monitor
+
+AURORA is also a working tool. **Mission Builder** (`#/missions`) lets you create a mission of any length, build any crew (up to 30 flying per run), set eleven spacecraft conditions, schedule thirteen kinds of event, and run a reproducible simulation of every astronaut's health indicators. Results show crew and individual trends, alerts with the modeled effects and events behind them, and scenario comparison that traces each output difference to a changed input. **Medical Monitor** (`#/medical`) is the monitoring view of the active mission, with Signal Veil and the Constellation Engine on any astronaut. All simulated values are labelled; nothing is a diagnosis. See `docs/MISSION_SIMULATOR.md` for the model, sources, limits and the spacecraft integration contract.
+
+---
+
 ## License
 
 MIT. Fictional mission and crew; no real person is depicted.

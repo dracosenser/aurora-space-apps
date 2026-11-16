@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Alert, AssistantMessage, DailyRecord, PageId, ScenarioParams } from '../types'
 import { ASTRONAUTS } from '../data/astronauts'
 import { EVENTS, MISSION } from '../data/mission'
@@ -83,7 +83,7 @@ const MissionContext = createContext<MissionState | null>(null)
 
 function pageFromHash(): PageId {
   const h = (window.location.hash || '').replace('#/', '').replace('#', '') as PageId
-  const valid: PageId[] = ['mission-control', 'crew-health', 'early-warning', 'self-check', 'signal-veil', 'flight-deck', 'workbench', 'simulator', 'assistant', 'sources', 'presentation']
+  const valid: PageId[] = ['mission-control', 'crew-health', 'early-warning', 'self-check', 'signal-veil', 'flight-deck', 'workbench', 'missions', 'medical', 'simulator', 'assistant', 'sources', 'presentation']
   return valid.includes(h) ? h : 'mission-control'
 }
 
@@ -116,9 +116,21 @@ export function MissionProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const records = useMemo(() => generateMissionRecords(MISSION.currentDay), [])
-  const visibleRecords = useMemo(() => records.filter((r) => r.day <= state.viewDay), [records, state.viewDay])
-  const alerts = useMemo(() => detectAnomalies(records, ASTRONAUTS, state.viewDay), [records, state.viewDay])
-  const statuses = useMemo(() => ASTRONAUTS.map((a) => computeStatus(a, records, alerts, state.viewDay)), [records, alerts, state.viewDay])
+  // Detection over the whole crew costs tens of milliseconds per mission day. Results are
+  // cached per day, and the derived data follows a deferred copy of the day so the slider
+  // and playback stay responsive while the work catches up.
+  const alertCache = useMemo(() => new Map<number, Alert[]>(), [records])
+  const day = useDeferredValue(state.viewDay)
+  const visibleRecords = useMemo(() => records.filter((r) => r.day <= day), [records, day])
+  const alerts = useMemo(() => {
+    let a = alertCache.get(day)
+    if (!a) {
+      a = detectAnomalies(records, ASTRONAUTS, day)
+      alertCache.set(day, a)
+    }
+    return a
+  }, [records, day, alertCache])
+  const statuses = useMemo(() => ASTRONAUTS.map((a) => computeStatus(a, records, alerts, day)), [records, alerts, day])
   const crew = useMemo(() => crewScore(statuses), [statuses])
 
   const value: MissionState = {

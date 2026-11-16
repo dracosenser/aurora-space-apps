@@ -212,6 +212,8 @@ export type PageId =
   | 'signal-veil'
   | 'flight-deck'
   | 'workbench'
+  | 'missions'
+  | 'medical'
   | 'crew-health'
   | 'early-warning'
   | 'simulator'
