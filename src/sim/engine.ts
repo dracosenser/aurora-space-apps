@@ -192,6 +192,13 @@ const NOISE_SD: Record<SimIndicator, number> = {
   stress: 0.35,
   fatigue: 0.4,
   radiationDose: 0,
+  systolicBP: 3,
+  diastolicBP: 2,
+  exerciseMinutes: 6,
+  muscleStrength: 0.15,
+  boneDensity: 0.01,
+  mood: 0.45,
+  sleepConsistency: 3,
 }
 
 function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: number, hourly: boolean): AstronautRun {
@@ -223,6 +230,11 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
 
   let debt = 0
   let decon = 0
+  let muscle = 100
+  let bone = 100
+  const lastSleep: number[] = []
+  const sys0 = b.systolicBP ?? 118
+  const dia0 = b.diastolicBP ?? 76
   const hours: Record<HourlyChannel, Float32Array> | null = hourly
     ? { heartRate: new Float32Array(days * 24), respRate: new Float32Array(days * 24), spo2: new Float32Array(days * 24), bodyTemp: new Float32Array(days * 24), activity: new Float32Array(days * 24) }
     : null
@@ -317,6 +329,34 @@ function simulateAstronaut(config: MissionConfig, a: AstronautProfile, days: num
     daily.stress[i] = clamp(stress + noise('stress'), 0, 10)
     daily.fatigue[i] = clamp(fatigue + noise('fatigue'), 0, 10)
     daily.radiationDose[i] = Math.max(0, dose * (1 + rng.normal(0, 0.03)))
+
+    // Musculoskeletal state, mood, exercise log, blood pressure, sleep consistency.
+    const g = Math.max(0, 1 - env.gravityG)
+    const exEff = 0.82 * exFraction
+    const muscleFloor = 100 - 34 * g * (1 - exEff)
+    muscle += (muscleFloor - muscle) * 0.012
+    bone -= 0.04 * g * (1 - 0.7 * exEff)
+    add('muscle-deconditioning', 'muscleStrength', day, muscle - 100)
+    add('bone-loss', 'boneDensity', day, bone - 100)
+    const moodStress = -0.6 * stressExcess
+    const moodDebt = -0.4 * debt
+    add('mood-model', 'mood', day, moodStress + moodDebt)
+    add('exercise-log', 'exerciseMinutes', day, x.exerciseMin - nominalExercise)
+    daily.muscleStrength[i] = clamp(muscle + noise('muscleStrength'), 30, 130)
+    daily.boneDensity[i] = clamp(bone + noise('boneDensity'), 70, 105)
+    daily.mood[i] = clamp(7.5 + moodStress + moodDebt + noise('mood'), 0, 10)
+    daily.exerciseMinutes[i] = clamp(x.exerciseMin + (x.exerciseMin > 0 ? noise('exerciseMinutes') : 0), 0, 400)
+    daily.systolicBP[i] = clamp(sys0 + noise('systolicBP'), 60, 220)
+    daily.diastolicBP[i] = clamp(dia0 + noise('diastolicBP'), 35, 140)
+    lastSleep.push(daily.sleepDuration[i])
+    if (lastSleep.length > 7) lastSleep.shift()
+    let mu = 0
+    for (const v of lastSleep) mu += v
+    mu /= lastSleep.length
+    let varSum = 0
+    for (const v of lastSleep) varSum += (v - mu) * (v - mu)
+    const sdSleep = lastSleep.length > 1 ? Math.sqrt(varSum / (lastSleep.length - 1)) : 0.35
+    daily.sleepConsistency[i] = clamp(92 - 26 * sdSleep + noise('sleepConsistency'), 0, 100)
 
     if (hours) {
       // Diurnal rendering of the day's state. Heart rate is lower asleep and

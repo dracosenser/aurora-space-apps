@@ -32,6 +32,8 @@ export interface AstronautBaseline {
   activityMinutes: number
   /** Day-to-day variation multiplier: 1 = typical, 0.5 = very steady, 2 = very variable. */
   variability: number
+  systolicBP?: number
+  diastolicBP?: number
 }
 
 export interface AstronautProfile {
@@ -138,6 +140,13 @@ export type SimIndicator =
   | 'stress'
   | 'fatigue'
   | 'radiationDose'
+  | 'systolicBP'
+  | 'diastolicBP'
+  | 'exerciseMinutes'
+  | 'muscleStrength'
+  | 'boneDensity'
+  | 'mood'
+  | 'sleepConsistency'
 
 /** Hourly channels, produced only at hourly resolution. */
 export type HourlyChannel = 'heartRate' | 'respRate' | 'spo2' | 'bodyTemp' | 'activity'

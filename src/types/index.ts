@@ -65,7 +65,7 @@ export interface Astronaut {
   name: string
   callsign: string
   role: string
-  age: number
+  age?: number
   background: string
   color: string
   initials: string

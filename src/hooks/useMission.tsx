@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useDeferredValue, useEffect, us
 import type { Alert, AssistantMessage, DailyRecord, PageId, ScenarioParams } from '../types'
 import { ASTRONAUTS } from '../data/astronauts'
 import { EVENTS, MISSION } from '../data/mission'
-import { generateMissionRecords } from '../data/generator'
+import { minViewDay } from '../sim/launch'
 import { detectAnomalies } from '../lib/anomaly'
 import { computeStatus, crewScore, type AstronautStatus } from '../lib/health'
 import { EMPTY_LOG, batteryComplete, newlyEarned, pointsForReading, type CrewLog, pointsForVeilStep } from '../lib/gamify'
@@ -17,6 +17,8 @@ import type { CheckId } from '../data/selfcheck'
 const LS_KEY = 'aurora.state.v1'
 
 interface PersistedState {
+  /** Which launched mission this state belongs to. */
+  missionKey: string
   viewDay: number
   theme: 'dark' | 'light'
   selectedAstronautId: string
@@ -27,29 +29,40 @@ interface PersistedState {
   log: CrewLog
 }
 
-const DEFAULT_STATE: PersistedState = {
-  viewDay: MISSION.currentDay,
-  theme: 'dark',
-  selectedAstronautId: ASTRONAUTS[0].id,
-  lastScenario: null,
-  chat: [],
-  tourSeen: false,
-  log: EMPTY_LOG,
+// The launched mission is applied before this provider mounts, so these read its values.
+function defaultState(missionKey: string): PersistedState {
+  return {
+    missionKey,
+    viewDay: MISSION.currentDay,
+    theme: 'dark',
+    selectedAstronautId: ASTRONAUTS[0]?.id ?? '',
+    lastScenario: null,
+    chat: [],
+    tourSeen: false,
+    log: EMPTY_LOG,
+  }
 }
 
-function loadState(): PersistedState {
+function loadState(missionKey: string): PersistedState {
+  const base = defaultState(missionKey)
   try {
     const raw = localStorage.getItem(LS_KEY)
-    if (!raw) return DEFAULT_STATE
+    if (!raw) return base
     const parsed = JSON.parse(raw) as Partial<PersistedState>
+    // A different mission was launched: keep preferences, reset mission-specific state.
+    const same = parsed.missionKey === missionKey
     return {
-      ...DEFAULT_STATE,
-      ...parsed,
+      ...base,
+      theme: parsed.theme ?? base.theme,
+      tourSeen: parsed.tourSeen ?? base.tourSeen,
+      lastScenario: parsed.lastScenario ?? null,
       log: { ...EMPTY_LOG, ...(parsed.log ?? {}) },
-      viewDay: Math.min(MISSION.currentDay, Math.max(45, parsed.viewDay ?? MISSION.currentDay)),
+      chat: same ? (parsed.chat ?? []) : [],
+      selectedAstronautId: same && ASTRONAUTS.some((a) => a.id === parsed.selectedAstronautId) ? parsed.selectedAstronautId! : base.selectedAstronautId,
+      viewDay: same ? Math.min(MISSION.currentDay, Math.max(minViewDay(), parsed.viewDay ?? MISSION.currentDay)) : MISSION.currentDay,
     }
   } catch {
-    return DEFAULT_STATE
+    return base
   }
 }
 
@@ -84,11 +97,16 @@ const MissionContext = createContext<MissionState | null>(null)
 function pageFromHash(): PageId {
   const h = (window.location.hash || '').replace('#/', '').replace('#', '') as PageId
   const valid: PageId[] = ['mission-control', 'crew-health', 'early-warning', 'self-check', 'signal-veil', 'flight-deck', 'workbench', 'missions', 'medical', 'simulator', 'assistant', 'sources', 'presentation']
-  return valid.includes(h) ? h : 'mission-control'
+  // Everything starts from the mission you build.
+  return valid.includes(h) ? h : 'missions'
 }
 
-export function MissionProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<PersistedState>(loadState)
+/**
+ * App-wide mission state. `records` are the daily records of the launched
+ * mission's simulation; the provider is remounted whenever a mission is launched.
+ */
+export function MissionProvider({ children, records, missionKey }: { children: ReactNode; records: DailyRecord[]; missionKey: string }) {
+  const [state, setState] = useState<PersistedState>(() => loadState(missionKey))
   const [page, setPageState] = useState<PageId>(pageFromHash)
 
   useEffect(() => {
@@ -115,7 +133,6 @@ export function MissionProvider({ children }: { children: ReactNode }) {
     window.scrollTo({ top: 0 })
   }, [])
 
-  const records = useMemo(() => generateMissionRecords(MISSION.currentDay), [])
   // Detection over the whole crew costs tens of milliseconds per mission day. Results are
   // cached per day, and the derived data follows a deferred copy of the day so the slider
   // and playback stay responsive while the work catches up.
@@ -143,7 +160,7 @@ export function MissionProvider({ children }: { children: ReactNode }) {
     statuses,
     crew,
     isLive: state.viewDay === MISSION.currentDay,
-    setViewDay: (d) => setState((s) => ({ ...s, viewDay: Math.min(MISSION.currentDay, Math.max(45, Math.round(d))) })),
+    setViewDay: (d) => setState((s) => ({ ...s, viewDay: Math.min(MISSION.currentDay, Math.max(minViewDay(), Math.round(d))) })),
     setTheme: (t) => setState((s) => ({ ...s, theme: t })),
     setSelectedAstronautId: (id) => setState((s) => ({ ...s, selectedAstronautId: id })),
     setLastScenario: (p) => setState((s) => ({ ...s, lastScenario: p })),
@@ -220,7 +237,7 @@ export function MissionProvider({ children }: { children: ReactNode }) {
       } catch {
         /* ignore */
       }
-      setState({ ...DEFAULT_STATE, tourSeen: true })
+      setState({ ...defaultState(missionKey), tourSeen: true })
       setPage('mission-control')
     },
   }

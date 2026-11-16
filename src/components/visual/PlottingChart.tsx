@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { minViewDay } from '../../sim/launch'
 import type { MissionEvent } from '../../types'
 import { MISSION, PHASES } from '../../data/mission'
 import { fmtDate } from '../../lib/format'
@@ -121,7 +122,7 @@ export function PlottingChart({
                   onMouseLeave={() => setHover(null)}
                   onFocus={() => setHover(e)}
                   onBlur={() => setHover(null)}
-                  onClick={() => onSelectDay?.(Math.min(MISSION.currentDay, Math.max(45, e.endDay ?? e.day)))}
+                  onClick={() => onSelectDay?.(Math.min(MISSION.currentDay, Math.max(minViewDay(), e.endDay ?? e.day)))}
                   tabIndex={0}
                   role="button"
                   aria-label={`${e.title}, mission day ${e.day}`}
@@ -209,7 +210,7 @@ export function PlottingChart({
                   key={e.id}
                   onMouseEnter={() => setHover(e)}
                   onMouseLeave={() => setHover(null)}
-                  onClick={() => onSelectDay?.(Math.min(MISSION.currentDay, Math.max(45, e.endDay ?? e.day)))}
+                  onClick={() => onSelectDay?.(Math.min(MISSION.currentDay, Math.max(minViewDay(), e.endDay ?? e.day)))}
                   className="cursor-pointer border-b border-ink/15 align-top transition-colors hover:bg-ink/[0.06]"
                 >
                   <td className="py-1.5 font-mono text-[10px] tabular-nums text-ink">{e.day}</td>

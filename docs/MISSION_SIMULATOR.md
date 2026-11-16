@@ -100,6 +100,24 @@ Reference ranges with no confirmed authoritative source (oxygen partial pressure
 - Cabin conditions are shared. An environmental event aimed at specific astronauts changes their simulated environment but not the shared cabin chart.
 - Results are not persisted; they are recomputed from the saved configuration.
 
+## Launching: the built mission drives all of AURORA
+
+The app now opens on the Mission Builder. **Run and launch** makes the mission the source of truth for every page, replacing the fixed Ares Meridiani demonstration:
+
+| Page | What it now shows |
+|---|---|
+| Mission Control, top bar, mission timeline, reports | The launched mission's name, identifier, destination, duration, crew and events |
+| Crew Health Analytics, Early Warning, Mission Assistant | Daily records derived from the launched mission's simulation |
+| Signal Veil | The launched crew; each astronaut's simulated signals and the same Constellation Engine analysis the Medical Monitor uses |
+| Medical Monitor | The launched mission (switching mission there launches it) |
+| Flight Deck consoles | Mission, crew and events; the environmental console shows the simulated cabin conditions for the selected day (the 3D scene is unchanged) |
+
+How it works (`src/sim/launch.ts`): launching stores a snapshot of the mission, simulates it, replaces the contents of the shared crew, mission, phase and event objects in `src/data`, derives each `DailyRecord` from the simulation, and remounts the app once. Editing in the builder does not disturb other pages until the mission is run again; the builder marks a mission as *launched*, *edited since launch* or *not launched*.
+
+To give the existing pages every indicator they show, the simulator also produces systolic and diastolic blood pressure (baseline plus variation only; no modeled effect), logged exercise, a muscle strength index and a bone health indicator (simplified deconditioning models informed by Trappe et al. 2009 and Stavnichuk et al. 2020), a mood index (simplified) and sleep consistency (derived from the last 7 nights).
+
+For missions shorter than about 45 days, the original rule-based Early Warning page has too little history to fire; the Constellation Engine (Signal Veil, Medical Monitor, Mission Builder results) needs about three weeks.
+
 ## Spacecraft integration contract
 
 The simulation is the source of truth. The 3D Flight Deck was **not modified**. It can consume the active mission through `src/sim/runtime.ts`:

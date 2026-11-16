@@ -122,6 +122,13 @@ export const SIM_INDICATORS: SimIndicatorDef[] = [
   { id: 'stress', label: 'Stress index', shortLabel: 'Stress', unit: '/10', decimals: 1, category: 'behavioral', kind: 'estimate', plausible: [0, 10], resolution: 0.1 },
   { id: 'fatigue', label: 'Fatigue index', shortLabel: 'Fatigue', unit: '/10', decimals: 1, category: 'behavioral', kind: 'estimate', plausible: [0, 10], resolution: 0.1 },
   { id: 'radiationDose', label: 'Daily radiation dose', shortLabel: 'Dose', unit: 'mSv', decimals: 2, category: 'radiation', kind: 'measured', plausible: [0, 500], resolution: 0.01 },
+  { id: 'systolicBP', label: 'Systolic blood pressure', shortLabel: 'Systolic', unit: 'mmHg', decimals: 0, category: 'cardiovascular', kind: 'measured', plausible: [60, 220], resolution: 1 },
+  { id: 'diastolicBP', label: 'Diastolic blood pressure', shortLabel: 'Diastolic', unit: 'mmHg', decimals: 0, category: 'cardiovascular', kind: 'measured', plausible: [35, 140], resolution: 1 },
+  { id: 'exerciseMinutes', label: 'Exercise logged', shortLabel: 'Exercise', unit: 'min', decimals: 0, category: 'activity', kind: 'measured', plausible: [0, 400], resolution: 1 },
+  { id: 'muscleStrength', label: 'Muscle strength index', shortLabel: 'Strength', unit: '% pre-flight', decimals: 1, category: 'activity', kind: 'estimate', plausible: [30, 130], resolution: 0.1 },
+  { id: 'boneDensity', label: 'Bone health indicator', shortLabel: 'Bone', unit: '% pre-flight', decimals: 2, category: 'activity', kind: 'estimate', plausible: [70, 105], resolution: 0.01 },
+  { id: 'mood', label: 'Mood index', shortLabel: 'Mood', unit: '/10', decimals: 1, category: 'behavioral', kind: 'estimate', plausible: [0, 10], resolution: 0.1 },
+  { id: 'sleepConsistency', label: 'Sleep consistency', shortLabel: 'Consistency', unit: '/100', decimals: 0, category: 'sleep', kind: 'estimate', plausible: [0, 100], resolution: 1 },
 ]
 
 export const SIM_INDICATOR_BY_ID = Object.fromEntries(SIM_INDICATORS.map((d) => [d.id, d])) as Record<SimIndicator, SimIndicatorDef>
@@ -227,8 +234,28 @@ export const EFFECTS: EffectDef[] = [
     basis: 'established', source: 'Accounting identity. EVA multiplier is a user setting: suits shield less than the vehicle.',
   },
   {
+    id: 'muscle-deconditioning', label: 'Reduced gravity and exercise set muscle strength',
+    model: 'Strength (% pre-flight) approaches 100 − 34 × (1 − g) × (1 − 0.82 × exercise fraction) at 1.2 % of the gap per day.',
+    basis: 'simplified', source: 'Strength loss after long ISS missions despite exercise (Trappe et al., J Appl Physiol, 2009); equilibrium and rate are assumptions.',
+  },
+  {
+    id: 'bone-loss', label: 'Reduced gravity and exercise set bone loss',
+    model: 'Bone indicator falls 0.04 % per day × (1 − g) × (1 − 0.7 × 0.82 × exercise fraction); no in-mission recovery.',
+    basis: 'simplified', source: 'Bone loss of the order of 1 %/month in weight-bearing sites, reduced by resistive exercise (Stavnichuk et al., npj Microgravity, 2020); the rate here is an assumption.',
+  },
+  {
+    id: 'mood-model', label: 'Stress and sleep debt lower mood',
+    model: 'Mood = 7.5 − 0.6 × (stress − 3, if positive) − 0.4 × hours of sleep debt.',
+    basis: 'simplified', source: 'Illustrative assumption. Mood is a modeled index, not a measurement.',
+  },
+  {
+    id: 'exercise-log', label: 'Exercise minutes follow the schedule and equipment',
+    model: 'Logged exercise = sessions/week × minutes ÷ 7 × equipment availability, with schedule changes from events.',
+    basis: 'established', source: 'Accounting identity.',
+  },
+  {
     id: 'individual-variation', label: 'Individual day-to-day variation',
-    model: 'Each indicator gets autocorrelated noise (AR(1), φ = 0.3) scaled by the astronaut’s variability setting, from a seed fixed per astronaut.',
+    model: 'Each indicator gets autocorrelated noise (AR(1), φ = 0.3) scaled by the astronaut’s variability setting, from a seed fixed per astronaut. Blood pressure has no modeled effect: it varies only by this noise around the baseline. Sleep consistency is derived as 92 − 26 × the standard deviation of the last 7 nights’ sleep.',
     basis: 'simplified', source: 'Represents ordinary biological and measurement variation. Same seed ⇒ same noise.',
   },
 ]

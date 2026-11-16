@@ -5,6 +5,7 @@ import { phaseForDay } from '../../../data/mission'
 import { runScenario, DEFAULT_PARAMS, RADIATION_SCENARIOS } from '../../../lib/simulator'
 import type { RadiationScenario, ScenarioParams } from '../../../types'
 import { Button } from '../../../components/ui/Button'
+import { launchedEnvironmentOn } from '../../../sim/launch'
 import type { StationId } from '../model/deck'
 
 /**
@@ -235,17 +236,25 @@ function Environment({ onLeave }: { onLeave: (page: 'simulator') => void }) {
         <p className="mono mb-2 flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.18em] text-white/40">
           <Thermometer className="h-3 w-3" /> Cabin — held at set point
         </p>
-        <Row label="Temperature" value="22.4 °C" />
-        <Row label="Pressure" value="101.3 kPa" />
-        <Row label="Oxygen partial pressure" value="21.2 kPa" />
-        <Row label="Carbon dioxide" value="0.4 kPa" />
-        <Row label="Relative humidity" value="44 %" />
-        <Row label="Artificial gravity" value="Not fitted" />
+        {(() => {
+          const env = launchedEnvironmentOn(m.viewDay)
+          return (
+            <>
+              <Row label="Temperature" value={`${env.cabinTempC.toFixed(1)} °C`} />
+              <Row label="Pressure" value={`${env.pressureKPa.toFixed(1)} kPa`} />
+              <Row label="Oxygen partial pressure" value={`${env.ppO2KPa.toFixed(1)} kPa`} />
+              <Row label="Carbon dioxide" value={`${env.co2mmHg.toFixed(1)} mmHg`} />
+              <Row label="Relative humidity" value={`${env.humidityPct.toFixed(0)} %`} />
+              <Row label="Noise" value={`${env.noiseDBA.toFixed(0)} dBA`} />
+              <Row label="Radiation" value={`${env.radiationMSvPerDay.toFixed(2)} mSv/day`} />
+              <Row label="Gravity" value={env.gravityG === 0 ? 'Microgravity' : `${env.gravityG} g`} />
+            </>
+          )
+        })()}
         <p className="mt-3 text-[11.5px] leading-relaxed text-white/40">
-          These are fixed nominal values shown for context. AURORA has no life-support model,
-          so they are not simulated and cannot be changed — inventing a control that did
-          nothing would be worse than showing none. The parameter set follows NASA-STD-3001
-          Volume 2; see docs/NASA_DATA.md.
+          Cabin conditions on mission day {m.viewDay} of the launched mission, including any
+          environmental events in effect. These are simulated scenario settings from the
+          Mission Builder, not life-support telemetry. Change them there.
         </p>
       </div>
 

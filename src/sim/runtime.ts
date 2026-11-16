@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import type { MissionAnalysis } from '../engine/analysis'
 import { alertsFor, analyzeAstronaut, type SimAlert } from './analyze'
 import { fingerprint, participants, simulate, validateConfig } from './engine'
-import { missionLibrary, useMissionLibrary } from './library'
+import { launchControl, useLaunchedMission } from './launch'
 import type { MissionConfig, SimulationResult } from './types'
 
 /**
@@ -70,8 +70,7 @@ export interface SpacecraftFeed {
 }
 
 export function spacecraftFeed(day?: number): SpacecraftFeed | null {
-  const config = missionLibrary.active()
-  if (!config) return null
+  const config = launchControl.get()
   const { result } = runMission(config)
   if (!result) return null
   const d = Math.min(result.days, Math.max(1, Math.round(day ?? result.days)))
@@ -90,8 +89,7 @@ export function spacecraftFeed(day?: number): SpacecraftFeed | null {
 
 /** React hook for the active mission, its run, and a function to analyse any astronaut. */
 export function useActiveSimulation() {
-  const lib = useMissionLibrary()
-  const config = lib.missions.find((m) => m.id === lib.activeId) ?? lib.missions[0] ?? null
+  const config = useLaunchedMission()
   const run = useMissionRun(config)
   return { config, ...run }
 }

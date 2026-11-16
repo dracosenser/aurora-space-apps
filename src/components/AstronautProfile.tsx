@@ -50,7 +50,8 @@ export function AstronautProfile({ astronaut, onClose }: { astronaut: Astronaut;
               </Badge>
             </div>
             <p className="text-sm text-muted">
-              {astronaut.role} · age {astronaut.age}
+              {astronaut.role}
+              {astronaut.age ? ` · age ${astronaut.age}` : ''}
             </p>
             <p className="mt-1 max-w-2xl text-xs text-text">{astronaut.background}</p>
           </div>

@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Check, RotateCcw } from 'lucide-react'
-import { useMission, ASTRONAUTS, EVENTS, MISSION } from '../hooks/useMission'
-import { datasetFromDailyRecords } from '../data/engineAdapters'
+import { useMission, ASTRONAUTS, MISSION } from '../hooks/useMission'
+import { datasetForAstronaut } from '../sim/analyze'
+import { analysisFor, useActiveSimulation } from '../sim/runtime'
 import { SignalVeilExperience, type ExperienceProgress } from '../features/signal-veil'
 import type { RecordedAction } from '../engine/types'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -41,7 +42,7 @@ function saveActions(actions: RecordedAction[]) {
  * game rather than two.
  */
 export function SignalVeil() {
-  const { records, viewDay, selectedAstronautId, setSelectedAstronautId, log, recordVeilProgress, isLive } = useMission()
+  const { viewDay, selectedAstronautId, setSelectedAstronautId, log, recordVeilProgress, isLive } = useMission()
 
   const astronaut = useMemo(
     () => ASTRONAUTS.find((a) => a.id === selectedAstronautId) ?? ASTRONAUTS[0],
@@ -52,10 +53,11 @@ export function SignalVeil() {
   // crew member: the visor's day state is fixed at mount, and the feature has
   // its own timeline. The top-bar day only decides where the visor opens, so
   // moving that slider never tears down the fog or the WebGL context.
-  const dataset = useMemo(
-    () => datasetFromDailyRecords(records, astronaut, EVENTS, MISSION.currentDay),
-    [records, astronaut],
-  )
+  // The launched mission's own simulation for this astronaut, and the same
+  // Constellation Engine analysis the Medical Monitor and Mission Builder use.
+  const { config, result } = useActiveSimulation()
+  const dataset = useMemo(() => (config && result ? datasetForAstronaut(config, result, astronaut.id) : null), [config, result, astronaut])
+  const analysis = useMemo(() => (config && result ? analysisFor(config, result, astronaut.id) : undefined), [config, result, astronaut])
 
   const [userActions, setUserActions] = useState<RecordedAction[]>(loadActions)
   const [resetKey, setResetKey] = useState(0)
@@ -100,7 +102,7 @@ export function SignalVeil() {
         eyebrow="Operations · 03"
         plate="PLATE SV"
         title="Signal Veil"
-        description="Your breath has fogged the visor. Wipe it clear, and behind the condensation is this crew member's health signals as a constellation — several that each moved only slightly, but moved together. Everything you work out here scores on the mission board."
+        description={`Your breath has fogged the visor. Wipe it clear, and behind the condensation are this crew member's simulated health signals from ${MISSION.name}, the mission you launched. Draw between signals, replay the mission, and see what moved together. Everything you work out here scores on the mission board.`}
         actions={
           <Button
             variant="outline"
@@ -139,16 +141,16 @@ export function SignalVeil() {
       </div>
 
       {/* --------------------------------------------------- the instrument */}
-      <SignalVeilExperience
+      {dataset && <SignalVeilExperience
         key={`${astronaut.id}-${resetKey}`}
-        dataset={dataset}
-        config={{ baseline: { mode: 'rolling' } }}
+        dataset={dataset!}
+        analysis={analysis}
         initialDay={Math.min(viewDay, MISSION.currentDay)}
         userActions={userActions}
         onRecordAction={record}
         onRemoveAction={remove}
         onProgress={onProgress}
-      />
+      />}
 
       {/* --------------------------------------------------------- the board */}
       <div className="mt-10">

@@ -12,7 +12,8 @@ import { colorForCategory } from '../features/signal-veil/model/layout'
 import { Panel } from '../features/workbench/shared'
 import { datasetForAstronaut } from '../sim/analyze'
 import { eventsDuring, participants } from '../sim/engine'
-import { missionLibrary, useMissionLibrary } from '../sim/library'
+import { useMissionLibrary } from '../sim/library'
+import { launchControl } from '../sim/launch'
 import { SIM_INDICATORS } from '../sim/reference'
 import { analysisFor, crewAlerts, useActiveSimulation } from '../sim/runtime'
 
@@ -82,7 +83,7 @@ export function MedicalMonitor() {
 
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 border border-border px-4 py-3">
         <span className="eyebrow-sm">Active mission</span>
-        <select className="h-8 border border-border-strong bg-transparent px-2 text-sm text-text-strong" value={config.id} onChange={(e) => missionLibrary.setActive(e.target.value)}>
+        <select className="h-8 border border-border-strong bg-transparent px-2 text-sm text-text-strong" value={config.id} onChange={(e) => { const m = lib.missions.find((x) => x.id === e.target.value); if (m) launchControl.launch(m) }}>
           {lib.missions.map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}

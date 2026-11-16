@@ -30,7 +30,7 @@ export function newAstronaut(index: number, patch: Partial<AstronautProfile> = {
     color: CREW_COLORS[index % CREW_COLORS.length],
     participates: true,
     schedule: { sleepStartHour: 22, sleepHours: 8.5, workHours: 9, exerciseSessionsPerWeek: 6, exerciseMinutes: 75, exerciseHour: 16, workload: 3 },
-    baseline: { restingHR: 60, hrv: 60, respRate: 14, spo2: 98, bodyTemp: 36.7, sleepNeed: 7, activityMinutes: 140, variability: 1 },
+    baseline: { restingHR: 60, hrv: 60, respRate: 14, spo2: 98, bodyTemp: 36.7, sleepNeed: 7, activityMinutes: 140, variability: 1, systolicBP: 118, diastolicBP: 76 },
     ...patch,
   }
 }

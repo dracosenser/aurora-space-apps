@@ -25,7 +25,7 @@ const CATEGORIES: CategoryDef[] = [
 ]
 
 /** Indicators fed to the engine. Workload is a scheduled input, not an outcome, so it is shown but not analysed. */
-const ANALYSED: SimIndicator[] = ['restingHR', 'hrv', 'respRate', 'spo2', 'bodyTemp', 'sleepDuration', 'sleepQuality', 'activityMinutes', 'stress', 'fatigue', 'radiationDose']
+const ANALYSED: SimIndicator[] = ['restingHR', 'hrv', 'systolicBP', 'respRate', 'spo2', 'bodyTemp', 'sleepDuration', 'sleepQuality', 'activityMinutes', 'exerciseMinutes', 'muscleStrength', 'stress', 'mood', 'fatigue', 'radiationDose']
 
 export function datasetForAstronaut(config: MissionConfig, result: SimulationResult, astronautId: string): MissionDataset {
   const run = result.astronauts.find((r) => r.astronautId === astronautId)

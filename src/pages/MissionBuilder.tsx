@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, FilePlus2, FileUp, GitBranch, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowRight, Copy, FilePlus2, FileUp, GitBranch, RotateCcw, Rocket, Trash2 } from 'lucide-react'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -11,9 +11,14 @@ import { fingerprint, participants, validateConfig } from '../sim/engine'
 import { blankMission, duplicateMission, isMission, missionLibrary, scenarioCopy, useMissionLibrary } from '../sim/library'
 import { ENV_PARAMS, outOfRange } from '../sim/reference'
 import { runMission } from '../sim/runtime'
+import { launchControl, useLaunchedMission } from '../sim/launch'
+import { useMission } from '../hooks/useMission'
 import type { MissionConfig } from '../sim/types'
 
 type Tab = 'library' | 'mission' | 'crew' | 'environment' | 'events' | 'review' | 'results' | 'compare'
+
+// Launching remounts the application; remember where the user was.
+let rememberedTab: Tab | null = null
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'library', label: 'Missions' },
@@ -35,14 +40,18 @@ export function MissionBuilder() {
   const lib = useMissionLibrary()
   const active = lib.missions.find((m) => m.id === lib.activeId) ?? lib.missions[0] ?? null
   const [draft, setDraft] = useState<MissionConfig | null>(active)
-  const [tab, setTab] = useState<Tab>(active ? 'review' : 'library')
-  const [ranKey, setRanKey] = useState<string | null>(null)
+  const launched = useLaunchedMission()
+  const { setPage } = useMission()
+  const [tab, setTabState] = useState<Tab>(rememberedTab ?? (active ? 'review' : 'library'))
+  const setTab = (t: Tab) => {
+    rememberedTab = t
+    setTabState(t)
+  }
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Load the draft whenever a different mission becomes active.
   useEffect(() => {
     setDraft(active)
-    setRanKey(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id])
 
@@ -57,13 +66,16 @@ export function MissionBuilder() {
   const issues = useMemo(() => (draft ? validateConfig(draft) : []), [draft])
   const errors = issues.filter((i) => i.level === 'error')
   const key = draft ? fingerprint(draft) : ''
-  const run = useMemo(() => (draft && ranKey === key ? runMission(draft) : null), [draft, ranKey, key])
+  const launchedKey = fingerprint(launched)
+  const isLaunched = !!draft && launched.id === draft.id && launchedKey === key
+  const run = useMemo(() => (draft && isLaunched ? runMission(draft) : null), [draft, isLaunched])
 
+  // Running a mission launches it: every page in AURORA switches to it.
   const doRun = () => {
     if (!draft || errors.length) return
     missionLibrary.save(draft)
-    setRanKey(key)
-    setTab('results')
+    rememberedTab = 'results'
+    launchControl.launch(draft)
   }
 
   const open = (id: string, to: Tab = 'review') => {
@@ -77,11 +89,11 @@ export function MissionBuilder() {
         eyebrow="Operations · Simulation"
         plate="PLATE MB"
         title="Mission Builder"
-        description="Create a mission of any length, build your own crew, set the spacecraft conditions and schedule events. Run a reproducible simulation of each astronaut's health indicators, see what the detection engine flags and why, and compare scenarios."
+        description="Start here. Build a mission of any length with your own crew, spacecraft conditions and events, then run it. The run launches the mission across AURORA: Mission Control, Signal Veil, the Medical Monitor, analytics and the Flight Deck all switch to it."
         actions={
           draft ? (
-            <Button variant="primary" icon={<Play className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
-              Run simulation
+            <Button variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
+              Run and launch
             </Button>
           ) : undefined
         }
@@ -94,6 +106,7 @@ export function MissionBuilder() {
             {draft.missionCode} · {draft.durationDays} DAYS · {participants(draft).length} CREW · {draft.events.length} EVENTS · {draft.resolution.toUpperCase()}
           </span>
           {draft.scenarioOf && <Badge tone="accent">scenario of {lib.missions.find((m) => m.id === draft.scenarioOf)?.name ?? 'another mission'}</Badge>}
+          {isLaunched ? <Badge tone="ok">launched · drives every page</Badge> : launched.id === draft.id ? <Badge tone="warn">edited since launch · run to update</Badge> : <Badge>not launched</Badge>}
           <span className="ml-auto text-muted">{errors.length ? <span className="text-danger">{errors.length} problem(s) to fix before running</span> : 'Saved automatically in this browser'}</span>
         </div>
       )}
@@ -151,7 +164,7 @@ export function MissionBuilder() {
                       {m.missionCode} · {m.destination}
                     </p>
                   </div>
-                  {m.id === lib.activeId && <Badge tone="accent">open</Badge>}
+                  {m.id === launched.id ? <Badge tone="ok">launched</Badge> : m.id === lib.activeId ? <Badge tone="accent">open</Badge> : null}
                 </div>
                 <p className="mono mt-2 text-[11px] text-muted">
                   {m.durationDays} days · {participants(m).length} crew · {m.events.length} events · seed {m.seed}
@@ -225,8 +238,8 @@ export function MissionBuilder() {
               ))}
             </ul>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button variant="primary" icon={<Play className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
-                Run simulation
+              <Button variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
+                Run and launch
               </Button>
               <Button
                 variant="ghost"
@@ -236,11 +249,34 @@ export function MissionBuilder() {
                 Reset configuration
               </Button>
             </div>
-            <p className="mt-3 text-[10.5px] leading-snug text-muted">The same configuration and seed always produce the same results, so a saved mission is a saved result. Export the numbers from the Results tab.</p>
+            <p className="mt-3 text-[10.5px] leading-snug text-muted">Running launches the mission across AURORA. The same configuration and seed always produce the same results, so a saved mission is a saved result.</p>
           </Panel>
         </div>
       )}
 
+      {draft && tab === 'results' && run?.result && (
+        <div className="mb-4 border border-accent/40 p-4">
+          <p className="eyebrow text-text-strong">Launched across AURORA</p>
+          <p className="mt-1 text-xs text-muted">This mission now drives every page. Explore it:</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(
+              [
+                ['signal-veil', 'Signal Veil'],
+                ['medical', 'Medical Monitor'],
+                ['mission-control', 'Mission Control'],
+                ['crew-health', 'Crew Health'],
+                ['early-warning', 'Early Warning'],
+                ['flight-deck', 'Flight Deck'],
+                ['assistant', 'Mission Assistant'],
+              ] as const
+            ).map(([id, label]) => (
+              <Button key={id} size="sm" variant={id === 'signal-veil' ? 'primary' : 'outline'} icon={<ArrowRight className="h-3 w-3" />} onClick={() => setPage(id)}>
+                {label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
       {draft && tab === 'results' &&
         (run?.result ? (
           <ResultsView m={draft} r={run.result} />
@@ -248,9 +284,10 @@ export function MissionBuilder() {
           <p className="border border-danger/40 px-3 py-2 text-xs text-danger">{run.error}</p>
         ) : (
           <div className="border border-border p-6 text-center">
-            <p className="text-sm text-text-strong">{ranKey ? 'The configuration changed since the last run.' : 'This mission has not been run yet.'}</p>
-            <Button className="mt-3" variant="primary" icon={<Play className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
-              Run simulation
+            <p className="text-sm text-text-strong">{launched.id === draft.id ? 'The configuration changed since this mission was launched.' : 'This mission has not been launched yet.'}</p>
+            <p className="mt-1 text-xs text-muted">Running it launches it: Mission Control, Signal Veil, the Medical Monitor and every other page switch to it.</p>
+            <Button className="mt-3" variant="primary" icon={<Rocket className="h-3.5 w-3.5" />} disabled={errors.length > 0} onClick={doRun}>
+              Run and launch
             </Button>
           </div>
         ))}

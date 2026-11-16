@@ -4,6 +4,7 @@ import { useMission, ASTRONAUTS, EVENTS, MISSION } from '../../hooks/useMission'
 import { phaseForDay } from '../../data/mission'
 import { fmtDate, fmtElapsed } from '../../lib/format'
 import { buildReport, downloadText } from '../../lib/report'
+import { minViewDay } from '../../sim/launch'
 import { Button } from '../ui/Button'
 
 /**
@@ -44,7 +45,8 @@ export function TopBar({ onMenu, onTour }: { onMenu: () => void; onTour: () => v
     downloadText(`AURORA-report-MD${m.viewDay}.md`, text)
   }
 
-  const pct = ((m.viewDay - 45) / (MISSION.currentDay - 45)) * 100
+  const lo = minViewDay()
+  const pct = ((m.viewDay - lo) / Math.max(1, MISSION.currentDay - lo)) * 100
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-bg">
@@ -83,7 +85,7 @@ export function TopBar({ onMenu, onTour }: { onMenu: () => void; onTour: () => v
             </button>
             <input
               type="range"
-              min={45}
+              min={lo}
               max={MISSION.currentDay}
               value={m.viewDay}
               onChange={(e) => {
