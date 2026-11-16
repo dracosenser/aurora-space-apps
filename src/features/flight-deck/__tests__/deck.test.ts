@@ -74,9 +74,17 @@ describe('collision', () => {
   it('slides along a wall rather than stopping dead', () => {
     // Push diagonally into the spine's starboard wall: the z component should
     // still carry, otherwise brushing a wall would halt all movement.
-    const start = { x: 2.9, z: 0 }
+    //
+    // The start point is derived from the deck plan rather than written in.
+    // It used to be a literal, and when the spine was narrowed that literal
+    // ended up outside the hull, where nothing can move in any direction and
+    // the assertion failed for a reason that had nothing to do with sliding.
+    const spine = ROOMS.find((r) => r.id === 'spine')!
+    const start = { x: spine.x1 - RADIUS - 0.02, z: 0 }
+    expect(inside(start.x, start.z), 'the start point must be inside the hull').toBe(true)
     const next = moveWithCollision(start.x, start.z, start.x + 0.1, start.z + 0.1, RADIUS)
-    expect(next.z).toBeGreaterThan(start.z)
+    expect(next.z, 'the z component should carry while x is blocked').toBeGreaterThan(start.z)
+    expect(next.x, 'the x component should be blocked by the wall').toBeCloseTo(start.x, 6)
   })
 })
 

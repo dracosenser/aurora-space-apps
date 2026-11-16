@@ -1,4 +1,9 @@
-import { CUPOLA, ROOMS, STATIONS, inside, type Room } from '../model/deck'
+import { CUPOLA, DOORS, ROOMS, STATIONS, inside, type Room } from '../model/deck'
+import { FIXTURES, FIXTURE_RANGE2, attenuation } from './fixtures'
+import {
+  airlockChamber, auxComputers, cableRuns, commandArea, evaPrepRoom, exerciseStation,
+  galley, hatchLeaf, hatchSurround,
+} from './outfitting'
 
 /**
  * The vessel interior, generated from the deck plan.
@@ -9,52 +14,53 @@ import { CUPOLA, ROOMS, STATIONS, inside, type Room } from '../model/deck'
  * and gridded floor panels over a grated centre run. Nothing is loaded from
  * disk and no texture is sampled; the detail is geometry.
  *
- * Vertex layout, 12 floats:
- *   position xyz | normal xyz | albedo rgb | roughness, metallic, ao
+ * Vertex layout, 15 floats:
+ *   position xyz | normal xyz | albedo rgb | roughness, metallic, ao | irradiance rgb
  *
  * Albedo is linear; the shader tonemaps and gamma-encodes. Ambient occlusion
- * is baked per vertex at build time against the deck plan, which is what puts
- * contact darkening into the corners for nothing at runtime.
+ * and the diffuse irradiance from every interior fixture are both baked per
+ * vertex at build time against the deck plan, which is what puts contact
+ * darkening into the corners and light into the rooms for nothing per frame.
  */
 
-export const FLOATS_PER_VERTEX = 12
+export const FLOATS_PER_VERTEX = 15
 
 export interface MeshData {
   vertices: Float32Array
   count: number
 }
 
-type Rgb = readonly [number, number, number]
+export type Rgb = readonly [number, number, number]
 /** roughness, metallic, ao */
-type Mat = readonly [number, number, number]
-type P3 = [number, number, number]
+export type Mat = readonly [number, number, number]
+export type P3 = [number, number, number]
 
 // ------------------------------------------------------------------ palette
 // Linear values. sRGB 0.85 is roughly linear 0.70.
-const PANEL: Rgb = [0.70, 0.685, 0.645]
-const PANEL_2: Rgb = [0.60, 0.59, 0.555]
-const PEACH: Rgb = [0.80, 0.40, 0.24]
-const PEACH_DK: Rgb = [0.55, 0.26, 0.15]
-const ALLOY: Rgb = [0.50, 0.51, 0.53]
-const DARKMETAL: Rgb = [0.085, 0.088, 0.098]
-const RAIL: Rgb = [0.09, 0.25, 0.45]
-const FLOORPAN: Rgb = [0.42, 0.43, 0.44]
-const GRATE: Rgb = [0.18, 0.185, 0.195]
-const CABLE: Rgb = [0.15, 0.155, 0.165]
-const BAG: Rgb = [0.66, 0.645, 0.60]
-const BAG_2: Rgb = [0.46, 0.48, 0.52]
-const LABEL: Rgb = [0.80, 0.79, 0.75]
-const AMBER_L: Rgb = [0.72, 0.44, 0.08]
+export const PANEL: Rgb = [0.70, 0.685, 0.645]
+export const PANEL_2: Rgb = [0.60, 0.59, 0.555]
+export const PEACH: Rgb = [0.80, 0.40, 0.24]
+export const PEACH_DK: Rgb = [0.55, 0.26, 0.15]
+export const ALLOY: Rgb = [0.50, 0.51, 0.53]
+export const DARKMETAL: Rgb = [0.085, 0.088, 0.098]
+export const RAIL: Rgb = [0.09, 0.25, 0.45]
+export const FLOORPAN: Rgb = [0.42, 0.43, 0.44]
+export const GRATE: Rgb = [0.18, 0.185, 0.195]
+export const CABLE: Rgb = [0.15, 0.155, 0.165]
+export const BAG: Rgb = [0.66, 0.645, 0.60]
+export const BAG_2: Rgb = [0.46, 0.48, 0.52]
+export const LABEL: Rgb = [0.80, 0.79, 0.75]
+export const AMBER_L: Rgb = [0.72, 0.44, 0.08]
 
-const M_PANEL: Mat = [0.62, 0.0, 1]
-const M_SOFT: Mat = [0.9, 0.0, 1]
-const M_METAL: Mat = [0.34, 0.85, 1]
-const M_RAIL: Mat = [0.3, 0.55, 1]
-const M_FRAME: Mat = [0.3, 0.7, 1]
-const M_RUBBER: Mat = [0.95, 0.0, 1]
-const M_FLOOR: Mat = [0.55, 0.25, 1]
+export const M_PANEL: Mat = [0.62, 0.0, 1]
+export const M_SOFT: Mat = [0.9, 0.0, 1]
+export const M_METAL: Mat = [0.34, 0.85, 1]
+export const M_RAIL: Mat = [0.3, 0.55, 1]
+export const M_FRAME: Mat = [0.3, 0.7, 1]
+export const M_RUBBER: Mat = [0.95, 0.0, 1]
+export const M_FLOOR: Mat = [0.55, 0.25, 1]
 
-class Builder {
+export class Builder {
   /**
    * A growable Float32Array rather than a number[]. The interior now emits
    * around 2.7 million floats, and pushing those as boxed numbers and copying
@@ -72,17 +78,19 @@ class Builder {
     this.buf = next
   }
 
-  private push12(
+  private push15(
     px: number, py: number, pz: number, nx: number, ny: number, nz: number,
     r: number, g: number, bl: number, ro: number, me: number, ao: number,
   ): void {
-    this.need(12)
+    this.need(15)
     const b = this.buf
     let i = this.n
     b[i++] = px; b[i++] = py; b[i++] = pz
     b[i++] = nx; b[i++] = ny; b[i++] = nz
     b[i++] = r; b[i++] = g; b[i++] = bl
     b[i++] = ro; b[i++] = me; b[i++] = ao
+    // Irradiance, filled in by bakeFixtureLighting once the mesh is complete.
+    b[i++] = 0; b[i++] = 0; b[i++] = 0
     this.n = i
   }
 
@@ -104,9 +112,9 @@ class Builder {
     nx /= len; ny /= len; nz /= len
     const [r, g, bl] = col
     const [ro, me, ao] = mat
-    this.push12(a[0], a[1], a[2], nx, ny, nz, r, g, bl, ro, me, ao)
-    this.push12(b[0], b[1], b[2], nx, ny, nz, r, g, bl, ro, me, ao)
-    this.push12(c[0], c[1], c[2], nx, ny, nz, r, g, bl, ro, me, ao)
+    this.push15(a[0], a[1], a[2], nx, ny, nz, r, g, bl, ro, me, ao)
+    this.push15(b[0], b[1], b[2], nx, ny, nz, r, g, bl, ro, me, ao)
+    this.push15(c[0], c[1], c[2], nx, ny, nz, r, g, bl, ro, me, ao)
   }
 
   quad(a: P3, b: P3, c: P3, d: P3, col: Rgb, mat: Mat): void {
@@ -133,9 +141,55 @@ export function axisOf(r: Room): 'x' | 'z' {
 }
 
 /** Deterministic, so the vessel is identical on every load. */
-function rnd(seed: number): number {
+export function rnd(seed: number): number {
   const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453
   return x - Math.floor(x)
+}
+
+// ------------------------------------------------------------- occupancy grid
+/**
+ * A coarse map of where the deck plan is walkable.
+ *
+ * Both bakes below ask "is this point inside the vessel?" millions of times,
+ * and the authoritative answer walks a list of room rectangles. Rasterising
+ * the plan once into a bitmap turns that into a single array index. The grid
+ * is only consulted by the bakes, never by movement or collision, which keep
+ * using the exact rectangles — so a cell boundary can never let a crew member
+ * walk through a wall.
+ */
+const CELL = 0.1
+let grid: Uint8Array | null = null
+let gx0 = 0
+let gz0 = 0
+let gw = 0
+let gh = 0
+
+function buildGrid(): void {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+  for (const r of ROOMS) {
+    minX = Math.min(minX, r.x0); maxX = Math.max(maxX, r.x1)
+    minZ = Math.min(minZ, r.z0); maxZ = Math.max(maxZ, r.z1)
+  }
+  gx0 = minX - CELL
+  gz0 = minZ - CELL
+  gw = Math.ceil((maxX - minX) / CELL) + 2
+  gh = Math.ceil((maxZ - minZ) / CELL) + 2
+  grid = new Uint8Array(gw * gh)
+  for (let j = 0; j < gh; j++) {
+    for (let i = 0; i < gw; i++) {
+      // Sample the cell centre against the real plan.
+      if (inside(gx0 + (i + 0.5) * CELL, gz0 + (j + 0.5) * CELL)) grid[j * gw + i] = 1
+    }
+  }
+}
+
+/** Grid-accelerated `inside`, for the bakes only. */
+function open(x: number, z: number): boolean {
+  if (!grid) buildGrid()
+  const i = ((x - gx0) / CELL) | 0
+  const j = ((z - gz0) / CELL) | 0
+  if (i < 0 || j < 0 || i >= gw || j >= gh) return false
+  return grid![j * gw + i] === 1
 }
 
 // -------------------------------------------------------------- rack bays
@@ -339,6 +393,37 @@ function moduleShell(b: Builder, r: Room, along: 'x' | 'z'): void {
     if (inside(probe[0], probe[2])) continue
     if (r.id === 'command' && end === a1) continue
 
+    // A hatch in this wall leads somewhere there is no room on the other side
+    // of — the outer hatch opens onto vacuum — so the opening has to be cut
+    // out of the bulkhead. Without this the leaf swings aside to reveal a
+    // solid wall, which is what it did the first time.
+    const door = DOORS.find((d) => d.axis === along && Math.abs(d.at - end) < 0.01)
+    if (door) {
+      const dh = 2.0
+      const lo = Math.max(w0 + c, Math.min(door.lo, door.hi))
+      const hi = Math.min(w1 - c, Math.max(door.lo, door.hi))
+      // Either side of the opening, full height.
+      if (lo > w0 + c + 0.01) b.quad(W(end, w0 + c, 0), W(end, lo, 0), W(end, lo, h), W(end, w0 + c, h), PANEL_2, M_PANEL)
+      if (hi < w1 - c - 0.01) b.quad(W(end, hi, 0), W(end, w1 - c, 0), W(end, w1 - c, h), W(end, hi, h), PANEL_2, M_PANEL)
+      // The strip above it.
+      if (h > dh) b.quad(W(end, lo, dh), W(end, hi, dh), W(end, hi, h), W(end, lo, h), PANEL_2, M_PANEL)
+      // Chamfers, then rack panels only where there is wall to put them on.
+      b.quad(W(end, w0, c), W(end, w0 + c, 0), W(end, w0 + c, h), W(end, w0, h - c), ALLOY, [0.5, 0.4, 1])
+      b.quad(W(end, w1 - c, 0), W(end, w1, c), W(end, w1, h - c), W(end, w1 - c, h), ALLOY, [0.5, 0.4, 1])
+      for (const [s0, s1] of [[w0 + c, lo], [hi, w1 - c]] as const) {
+        if (s1 - s0 < 0.6) continue
+        const n2 = Math.max(1, Math.round((s1 - s0) / 1.1))
+        const pw2 = (s1 - s0) / n2
+        for (let k = 0; k < n2; k++) {
+          const u0 = s0 + k * pw2
+          const place = (u: number, hh: number, out: number): P3 =>
+            W(end + outward * out, u0 + (outward > 0 ? u : pw2 - u), c + hh)
+          rackFace(b, place, pw2, h - 2 * c, 311 + k * 7.3 + (end === a0 ? 0 : 53))
+        }
+      }
+      continue
+    }
+
     // Bulkhead face, then two rack panels on it so it is not a blank wall.
     b.quad(W(end, w0 + c, 0), W(end, w1 - c, 0), W(end, w1 - c, h), W(end, w0 + c, h), PANEL_2, M_PANEL)
     b.quad(W(end, w0, c), W(end, w0 + c, 0), W(end, w0 + c, h), W(end, w0, h - c), ALLOY, [0.5, 0.4, 1])
@@ -512,7 +597,7 @@ function workstation(b: Builder, x: number, z: number, facing: number, width: nu
   b.box(...boxPts(P(0.1, 0.78, 0.44), P(0.14, 1.0, 0.48)), CABLE, M_RUBBER)
 }
 
-function boxPts(a: P3, b: P3): [number, number, number, number, number, number] {
+export function boxPts(a: P3, b: P3): [number, number, number, number, number, number] {
   return [a[0], a[1], a[2], b[0], b[1], b[2]]
 }
 
@@ -540,6 +625,27 @@ export function buildEmissive(): MeshData {
     }
   }
   return b.data()
+}
+
+/**
+ * The hatch leaves, as their own mesh.
+ *
+ * Built once at the origin and drawn twice with a model matrix, because they
+ * are the only geometry in the vessel that moves. Their baked irradiance is
+ * sampled where the shut hatch sits, which is where a leaf spends almost all
+ * of its time and all of the time anyone is looking at it closely.
+ */
+export function buildHatches(): MeshData {
+  const b = new Builder()
+  hatchLeaf(b, 1.8, 2.0)
+  const mesh = b.data()
+  const v = mesh.vertices
+  for (let o = 0; o < v.length; o += FLOATS_PER_VERTEX) {
+    v[o + 12] = 0.30
+    v[o + 13] = 0.295
+    v[o + 14] = 0.275
+  }
+  return mesh
 }
 
 // -------------------------------------------------------------- assembly
@@ -578,10 +684,19 @@ export function buildStructure(): MeshData {
 
   for (const s of STATIONS) workstation(b, s.x, s.z, s.facing, s.width)
   sleepStations(b)
+  evaPrepRoom(b)
+  airlockChamber(b)
+  galley(b)
+  exerciseStation(b)
+  commandArea(b)
+  auxComputers(b)
+  cableRuns(b)
+  for (const d of DOORS) hatchSurround(b, d.id, 2.0)
 
   const mesh = b.data()
   orientFaces(mesh)
   bakeAmbientOcclusion(mesh)
+  bakeFixtureLighting(mesh)
   return mesh
 }
 
@@ -713,7 +828,7 @@ function bakeAmbientOcclusion(mesh: MeshData): void {
     const by = nz * tx - nx * tz
     const bz = nx * ty - ny * tx
 
-    let open = 0
+    let seen = 0
     let total = 0
     for (const [dx, dy, dz] of dirs) {
       const wx = tx * dx + nx * dy + bx * dz
@@ -724,9 +839,91 @@ function bakeAmbientOcclusion(mesh: MeshData): void {
         const sx = px + wx * d + nx * 0.02
         const sy = py + wy * d + ny * 0.02
         const sz = pz + wz * d + nz * 0.02
-        if (sy > 0.03 && sy < 3.2 && inside(sx, sz)) open++
+        if (sy > 0.03 && sy < 3.2 && open(sx, sz)) seen++
       }
     }
-    v[o + 11] *= 0.3 + 0.7 * Math.pow(total ? open / total : 1, 0.8)
+    v[o + 11] *= 0.3 + 0.7 * Math.pow(total ? seen / total : 1, 0.8)
+  }
+}
+
+/**
+ * Per-vertex diffuse irradiance from every interior fixture, with visibility.
+ *
+ * This is the optimisation that bought the frame rate back. The fragment
+ * shader used to loop a sixteen-element light array per pixel, evaluating a
+ * full microfacet BRDF for each fixture that survived a distance cull.
+ * Ablating the shader term by term measured that loop at 85 per cent of the
+ * structure pass, which was itself 78 to 99 per cent of the frame; by
+ * comparison the shadow map, the tonemap and the cupola wash were each under
+ * five per cent. Capping the loop at four lights recovered 61 per cent of the
+ * pass, which is the shape of a cost that is linear in light count.
+ *
+ * The rig does not move and neither does the vessel, so none of that work
+ * needed to happen per pixel per frame. Each vertex's diffuse response to all
+ * of the fixtures is summed once here instead.
+ *
+ * Baking is not merely cheaper, it is better. The old path capped at sixteen
+ * of the twenty-four fixtures, so the aft end of the station was lit by
+ * whichever lights happened to sort first, and it had no occlusion at all:
+ * a fixture lit a vertex through a bulkhead if the two were close enough. Here
+ * the segment from vertex to fixture is marched against the deck plan, so a
+ * sleep station is dark inside, the inside of a hatch throat falls off, and
+ * light does not cross a wall.
+ *
+ * What baking cannot do is the view-dependent part. Specular highlights move
+ * with the eye, so a few fixtures are still sent to the shader each frame for
+ * that alone — see `nearestFixtures` in the renderer.
+ */
+function bakeFixtureLighting(mesh: MeshData): void {
+  const v = mesh.vertices
+  const S = FLOATS_PER_VERTEX
+  if (!grid) buildGrid()
+
+  // Flat arrays: the inner loop runs a few million times and property access
+  // on an object array shows up when it does.
+  const n = FIXTURES.length
+  const lx = new Float64Array(n), ly = new Float64Array(n), lz = new Float64Array(n)
+  const lr = new Float64Array(n), lg = new Float64Array(n), lb = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    lx[i] = FIXTURES[i].p[0]; ly[i] = FIXTURES[i].p[1]; lz[i] = FIXTURES[i].p[2]
+    lr[i] = FIXTURES[i].c[0]; lg[i] = FIXTURES[i].c[1]; lb[i] = FIXTURES[i].c[2]
+  }
+
+  for (let o = 0; o < v.length; o += S) {
+    const px = v[o], py = v[o + 1], pz = v[o + 2]
+    const nx = v[o + 3], ny = v[o + 4], nz = v[o + 5]
+    let ir = 0, ig = 0, ib = 0
+
+    for (let i = 0; i < n; i++) {
+      const dx = lx[i] - px, dy = ly[i] - py, dz = lz[i] - pz
+      const dist2 = dx * dx + dy * dy + dz * dz
+      if (dist2 > FIXTURE_RANGE2 || dist2 < 1e-6) continue
+      const inv = 1 / Math.sqrt(dist2)
+      const nl = (dx * nx + dy * ny + dz * nz) * inv
+      if (nl <= 0) continue
+
+      // Visibility. Walk the segment and ask whether it stays in open space.
+      // Six steps over at most 9.5 m is about 1.6 m apart, which is coarse but
+      // the structures it has to catch — bulkheads, pod carcasses, the throat
+      // of a hatch — are all much wider than that.
+      const dist = Math.sqrt(dist2)
+      let blocked = false
+      const steps = 6
+      for (let k = 1; k <= steps; k++) {
+        const t = (k / (steps + 1)) * dist
+        const sx = px + dx * inv * t + nx * 0.03
+        const sy = py + dy * inv * t + ny * 0.03
+        const sz = pz + dz * inv * t + nz * 0.03
+        if (sy < 0.02 || sy > 3.4 || !open(sx, sz)) { blocked = true; break }
+      }
+      if (blocked) continue
+
+      const a = nl * attenuation(dist2)
+      ir += lr[i] * a; ig += lg[i] * a; ib += lb[i] * a
+    }
+
+    v[o + 12] = ir
+    v[o + 13] = ig
+    v[o + 14] = ib
   }
 }

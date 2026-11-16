@@ -8,7 +8,22 @@ import {
   moveWithCollision, heightAt, stationInReach, ROOMS, SPAWN, STATIONS, STATION_BY_ID,
   type Station, type StationId,
 } from './model/deck'
-import { OBJECTIVES, currentObjective, loadProgress, objectiveDone, saveProgress, type TaskId } from './model/objectives'
+import {
+  advance as advanceAirlock, command as airlockCommand, hatchOpenness, newAirlock, shutDoors,
+  type Airlock, type AirlockCommand,
+} from './model/airlock'
+import { newSuitPrep, prepComplete, type SuitPrep } from './model/suit'
+import {
+  ALL_EVA_STEPS, EGRESS, EVA_TASK_BY_ID, evaPointInReach, siteInReach, stepEva, tetherDistance,
+  TETHER_LENGTH, taskComplete,
+  type EvaMotion, type EvaPoint, type EvaTaskId,
+} from './model/eva'
+import { AirlockPanel, PostEvaPanel, SuitPanel, WorksitePanel } from './ui/EvaPanels'
+import {
+  OBJECTIVES, currentObjective, loadProgress, loadSteps, objectiveDone, saveProgress, saveSteps,
+  type TaskId,
+} from './model/objectives'
+import { ALL_PROC_STEPS } from './model/procedures'
 import { StationContent } from './ui/StationPanels'
 
 const EYE = 1.62
@@ -74,6 +89,18 @@ export function FlightDeck() {
   /** True while the camera is flying to or from a console screen. */
   const [flying, setFlying] = useState(false)
 
+  // ---- the extravehicular system
+  const [airlock, setAirlock] = useState<Airlock>(newAirlock)
+  const [prep, setPrep] = useState<SuitPrep>(newSuitPrep)
+  const [evaSteps, setEvaSteps] = useState<string[]>([])
+  /** Which EVA screen is up, if any. Separate from the console `open`. */
+  const [evaPanel, setEvaPanel] = useState<'suit' | 'airlock' | 'post' | EvaTaskId | null>(null)
+  /** The EVA interaction point or worksite being looked at, for the prompt. */
+  const [evaPrompt, setEvaPrompt] = useState<{ kind: 'point' | 'site' | 'return'; label: string; hint: string } | null>(null)
+  const [tether, setTether] = useState({ out: 0, taut: false, grip: false })
+  /** Completed procedure steps, qualified by procedure. */
+  const [procDone, setProcDone] = useState<string[]>([])
+
   const openRef = useRef<StationId | null>(null)
   openRef.current = open
   const alertRef = useRef(0)
@@ -89,9 +116,31 @@ export function FlightDeck() {
   const resizeRef = useRef<(() => void) | null>(null)
   const resetGovRef = useRef<(() => void) | null>(null)
   const openStationRef = useRef<((id: StationId) => void) | null>(null)
+  /**
+   * The airlock is advanced by the loop and commanded by the panel, so the
+   * loop owns a mutable copy and React mirrors it. Keeping React as the owner
+   * would mean a setState every frame of a pressure sequence just to move a
+   * bar, and keeping the loop as the sole owner would leave the panel stale.
+   */
+  const airlockRef = useRef<Airlock>(newAirlock())
+  const prepRef = useRef<SuitPrep>(newSuitPrep())
+  prepRef.current = prep
+  const evaRef = useRef<EvaMotion>({ x: EGRESS.x, y: EGRESS.y, z: EGRESS.z, vx: 0, vy: 0, vz: 0 })
+  const evaPanelRef = useRef<typeof evaPanel>(null)
+  evaPanelRef.current = evaPanel
+  const evaPromptRef = useRef<{ kind: 'point' | 'site' | 'return'; label: string; hint: string; id?: string } | null>(null)
+  const openEvaRef = useRef<(() => void) | null>(null)
+  const runCommandRef = useRef<((c: AirlockCommand) => void) | null>(null)
+  const evaStepsRef = useRef<string[]>([])
+  evaStepsRef.current = evaSteps
 
   useEffect(() => {
     setDone(loadProgress())
+    // Procedure steps and worksite steps share one store; each is validated
+    // against the keys its own model actually defines.
+    const all = loadSteps([...ALL_PROC_STEPS, ...ALL_EVA_STEPS])
+    setProcDone(all.filter((k) => !k.startsWith('eva-0')))
+    setEvaSteps(all.filter((k) => k.startsWith('eva-0')))
     setTouch(window.matchMedia('(pointer: coarse)').matches)
   }, [])
 
@@ -101,6 +150,16 @@ export function FlightDeck() {
       if (prev.includes(id)) return prev
       const next = [...prev, id]
       saveProgress(next)
+      return next
+    })
+  }, [])
+
+  /** Record one performed step. Idempotent; persisted beside the task list. */
+  const markProcStep = useCallback((key: string) => {
+    setProcDone((prev) => {
+      if (prev.includes(key)) return prev
+      const next = [...prev, key]
+      saveSteps([...next, ...evaStepsRef.current])
       return next
     })
   }, [])
@@ -204,6 +263,33 @@ export function FlightDeck() {
     document.addEventListener('visibilitychange', onVis)
 
     const pose = (): Pose => ({ x, y: eyeY, z, yaw, pitch })
+    /** Outside the hull exactly while the spacewalk is live. */
+    const outsideNow = () => airlockRef.current.state === 'eva-active'
+    let mirrorAt = 0
+
+    // Commands come from the panel; the loop needs to react to two of them by
+    // moving the camera, which is why this lives here rather than in a
+    // callback that cannot see the loop's own position variables.
+    runCommandRef.current = (c: AirlockCommand) => {
+      const next = airlockCommand(airlockRef.current, c, prepComplete(prepRef.current))
+      airlockRef.current = next
+      setAirlock(next)
+      if (c === 'egress' && next.state === 'eva-active') {
+        // Step out onto the hull at the hatch, with no leftover velocity.
+        evaRef.current = { x: EGRESS.x, y: EGRESS.y, z: EGRESS.z, vx: 0, vy: 0, vz: 0 }
+        x = EGRESS.x; eyeY = EGRESS.y; z = EGRESS.z
+        yaw = Math.atan2(-(0 - EGRESS.x), -(-21.7 - EGRESS.z))
+        pitch = 0
+      }
+      if (c === 'return' && next.state === 'crew-returning') {
+        // Back inside the chamber, standing on the deck again.
+        x = -10.0; z = -21.7; eyeY = EYE
+        yaw = Math.atan2(-(1), -(0))
+      }
+      if (c === 'ingress') {
+        x = -6.6; z = -21.7; eyeY = EYE
+      }
+    }
 
     const beginZoom = (id: StationId) => {
       if (zoomRef.current) return
@@ -225,12 +311,26 @@ export function FlightDeck() {
         return
       }
       if (openRef.current || zoomRef.current) return
-      if (['w', 'a', 's', 'd', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+      if (['w', 'a', 's', 'd', 'shift', 'control', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
         keys.add(k)
         e.preventDefault()
       }
-      if (k === 'e' && promptRef.current) beginZoom(promptRef.current.id)
+      if (k === 'e') {
+        // Outside, and at the EVA fittings inside, E opens the EVA screen for
+        // whatever is in reach. At a console it flies the camera onto it.
+        if (evaPromptRef.current) openEvaRef.current?.()
+        else if (promptRef.current) beginZoom(promptRef.current.id)
+      }
     }
+    openEvaRef.current = () => {
+      const ep = evaPromptRef.current
+      if (!ep) return
+      if (ep.kind === 'point') setEvaPanel(ep.id === 'suit-rack' ? 'suit' : 'airlock')
+      else if (ep.kind === 'site' && ep.id) setEvaPanel(ep.id as EvaTaskId)
+      else if (ep.kind === 'return') runCommandRef.current?.('return')
+      document.exitPointerLock?.()
+    }
+
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase())
     const onBlur = () => keys.clear()
 
@@ -247,7 +347,11 @@ export function FlightDeck() {
     }
 
     const onCanvasClick = () => {
-      if (openRef.current || zoomRef.current) return
+      if (openRef.current || zoomRef.current || evaPanelRef.current) return
+      if (evaPromptRef.current && document.pointerLockElement === canvas) {
+        openEvaRef.current?.()
+        return
+      }
       if (promptRef.current && document.pointerLockElement === canvas) {
         beginZoom(promptRef.current.id)
         return
@@ -312,7 +416,36 @@ export function FlightDeck() {
           zoomRef.current = null
           setFlying(false)
         }
-      } else if (!openRef.current) {
+      } else if (!openRef.current && !evaPanelRef.current && outsideNow()) {
+        // ---- free fall, outside the hull
+        //
+        // A different movement model, not the interior walk with gravity off:
+        // input accelerates rather than sets speed, nothing stops you but a
+        // handrail, and the tether is the only hard limit.
+        const fwd = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0)
+        const strafe = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0)
+        const rise = (keys.has(' ') ? 1 : 0) - (keys.has('shift') || keys.has('control') ? 1 : 0)
+        // Forward follows where the crew member is looking, pitch included.
+        const cp = Math.cos(pitch)
+        const fx = -Math.sin(yaw) * cp
+        const fy = Math.sin(pitch)
+        const fz = -Math.cos(yaw) * cp
+        const rx = Math.cos(yaw)
+        const rz = -Math.sin(yaw)
+        let ax = fx * fwd + rx * strafe
+        let ay = fy * fwd + rise
+        let az = fz * fwd + rz * strafe
+        const al = Math.hypot(ax, ay, az)
+        if (al > 1) { ax /= al; ay /= al; az /= al }
+        const m2 = stepEva(evaRef.current, ax, ay, az, dt)
+        evaRef.current = { x: m2.x, y: m2.y, z: m2.z, vx: m2.vx, vy: m2.vy, vz: m2.vz }
+        x = m2.x
+        eyeY = m2.y
+        z = m2.z
+        if (Math.random() < 0.08) {
+          setTether({ out: tetherDistance(m2.x, m2.y, m2.z), taut: m2.taut, grip: m2.grip })
+        }
+      } else if (!openRef.current && !evaPanelRef.current) {
         const travel = travelRef.current
         if (travel) {
           const k = Math.min(1, dt * 2.6)
@@ -336,12 +469,31 @@ export function FlightDeck() {
             const len = Math.hypot(vx, vz) || 1
             vx = (vx / len) * speed
             vz = (vz / len) * speed
-            const next = moveWithCollision(x, z, x + vx, z + vz, RADIUS)
+            // The shut-hatch set comes from the same airlock state that
+            // drives the leaf the renderer draws, so a hatch can never look
+            // open while blocking or look shut while letting someone past.
+            const next = moveWithCollision(x, z, x + vx, z + vz, RADIUS, shutDoors(airlockRef.current))
             x = next.x
             z = next.z
           }
         }
         eyeY += (Math.min(EYE, heightAt(x, z) - 0.55) - eyeY) * Math.min(1, dt * 8)
+      }
+
+      // ---- the airlock runs on its own clock, whatever else is happening
+      {
+        const before = airlockRef.current
+        const after = advanceAirlock(before, dt)
+        airlockRef.current = after
+        // Mirror to React on a state change at once, and otherwise only often
+        // enough to move a pressure bar smoothly.
+        if (after.state !== before.state) {
+          setAirlock(after)
+          mirrorAt = now
+        } else if (now - mirrorAt > 110) {
+          setAirlock(after)
+          mirrorAt = now
+        }
       }
 
       const near = openRef.current || zoomRef.current ? null : stationInReach(x, z, yaw)
@@ -350,7 +502,32 @@ export function FlightDeck() {
         setPrompt(near)
       }
 
-      renderer.render({ eye: [x, eyeY, z], yaw, pitch, time: clock, alert: alertRef.current })
+      // ---- what the EVA system offers from here
+      {
+        let ep: { kind: 'point' | 'site' | 'return'; label: string; hint: string; id?: string } | null = null
+        if (!openRef.current && !zoomRef.current && !evaPanelRef.current) {
+          if (outsideNow()) {
+            const site = siteInReach(x, eyeY, z)
+            if (site) ep = { kind: 'site', label: site.code + ' · ' + site.title, hint: site.site.label, id: site.id }
+            else if (Math.hypot(x - EGRESS.x, eyeY - EGRESS.y, z - EGRESS.z) < 3.0) {
+              ep = { kind: 'return', label: 'Return to the airlock', hint: 'Enter the chamber and close the outer hatch' }
+            }
+          } else {
+            const pt: EvaPoint | null = evaPointInReach(x, z, yaw)
+            if (pt) ep = { kind: 'point', label: pt.label, hint: pt.hint, id: pt.id }
+          }
+        }
+        if (ep?.id !== evaPromptRef.current?.id || ep?.kind !== evaPromptRef.current?.kind) {
+          evaPromptRef.current = ep
+          setEvaPrompt(ep)
+        }
+      }
+
+      renderer.render({
+        eye: [x, eyeY, z], yaw, pitch, time: clock, alert: alertRef.current,
+        mode: outsideNow() ? 'exterior' : 'interior',
+        hatches: hatchOpenness(airlockRef.current),
+      })
 
       const next = gov.sample(dtMs, qualityRef.current, !autoRef.current)
       if (next && next !== qualityRef.current) {
@@ -386,6 +563,8 @@ export function FlightDeck() {
       resizeRef.current = null
       resetGovRef.current = null
       openStationRef.current = null
+      runCommandRef.current = null
+      openEvaRef.current = null
     }
   }, [toggleFullscreen])
 
@@ -407,6 +586,48 @@ export function FlightDeck() {
     travelRef.current = { x: s.x - bx * 2.0, y: EYE, z: s.z - bz * 2.0, yaw: Math.atan2(-bx, -bz), pitch: 0 }
   }, [])
 
+  /** Outside the hull exactly while the spacewalk is live. */
+  const outside = airlock.state === 'eva-active'
+
+  // Escape closes an EVA screen, as it closes a console.
+  useEffect(() => {
+    if (!evaPanel) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setEvaPanel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [evaPanel])
+
+  // Coming back in offers the post-EVA review once, and only after a spacewalk
+  // that actually happened.
+  useEffect(() => {
+    if (airlock.state === 'post-eva' && airlock.evaSeconds > 0) setEvaPanel('post')
+  }, [airlock.state, airlock.evaSeconds])
+
+  /**
+   * The EVA objective tasks.
+   *
+   * Each is closed by the thing it describes having happened, rather than by
+   * a screen having been opened: the suit task by the preparation model
+   * reporting complete, the egress task by the airlock reaching the state
+   * where a crew member is outside, and the maintenance tasks by their steps
+   * being in the completed set.
+   */
+  useEffect(() => {
+    if (prepComplete(prep)) markTask('eva-suit-ready')
+  }, [prep, markTask])
+  useEffect(() => {
+    if (airlock.state === 'eva-active') markTask('eva-egress')
+    if (airlock.state === 'post-eva') markTask('eva-ingress')
+  }, [airlock.state, markTask])
+  useEffect(() => {
+    const tasks = Object.values(EVA_TASK_BY_ID)
+    const closed = tasks.filter((t) => taskComplete(t, evaSteps))
+    if (closed.length > 0) markTask('eva-task-done')
+    if (closed.length === tasks.length) markTask('eva-all-tasks')
+  }, [evaSteps, markTask])
+
   const objective = currentObjective(done)
   const doneCount = OBJECTIVES.filter((o) => objectiveDone(o, done)).length
 
@@ -422,7 +643,19 @@ export function FlightDeck() {
           </p>
         </div>
         <DeckPlan onOpen={setOpen} />
-        {open && <StationModal id={open} onClose={() => setOpen(null)} onLeave={leave} onTask={markTask} zoomed={false} />}
+        {open && (
+          <StationModal
+            id={open}
+            onClose={() => setOpen(null)}
+            onLeave={leave}
+            onTask={markTask}
+            zoomed={false}
+            procDone={procDone}
+            onProcStep={markProcStep}
+            evaDone={airlock.evaSeconds > 0}
+            evaSeconds={airlock.evaSeconds}
+          />
+        )}
       </div>
     )
   }
@@ -452,6 +685,48 @@ export function FlightDeck() {
               <p className="mono mt-1.5 text-[10.5px] uppercase tracking-[0.18em] text-white/45">Click or press E to use</p>
             </div>
           </>
+        )}
+
+        {/* The EVA prompt: suit rack, airlock control, a worksite, or the
+            way back in. Same shape as the console prompt so the two read as
+            one interaction. */}
+        {locked && evaPrompt && !open && !evaPanel && (
+          <>
+            <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+              <div className="h-5 w-5 rounded-full border border-amber-300/80" />
+            </div>
+            <div className="pointer-events-none absolute bottom-20 left-1/2 w-[min(90%,30rem)] -translate-x-1/2 border border-amber-300/30 bg-black/70 px-4 py-2.5 text-center backdrop-blur-sm">
+              <p className="mono text-[10px] uppercase tracking-[0.2em] text-amber-200/70">
+                {evaPrompt.kind === 'site' ? 'Exterior worksite' : evaPrompt.kind === 'return' ? 'Airlock' : 'EVA'}
+              </p>
+              <p className="mt-0.5 text-[14px] text-white/90">{evaPrompt.label}</p>
+              <p className="mt-0.5 text-[11.5px] text-white/50">{evaPrompt.hint}</p>
+              <p className="mono mt-1.5 text-[10.5px] uppercase tracking-[0.18em] text-white/45">Click or press E</p>
+            </div>
+          </>
+        )}
+
+        {/* The spacewalk HUD. Only outside, where tether and grip are the
+            whole of what a crew member has to think about. */}
+        {outside && !evaPanel && (
+          <div className="absolute bottom-3 right-3 border border-amber-300/25 bg-black/70 px-3 py-2 backdrop-blur-sm">
+            <p className="mono text-[9.5px] uppercase tracking-[0.18em] text-amber-200/70">Extravehicular</p>
+            <p className="mono mt-1 text-[11px] text-white/80">
+              Tether {tether.out.toFixed(1)} / {TETHER_LENGTH} m
+            </p>
+            <div className="mt-1 h-1 w-36 border border-white/20">
+              <div
+                className={`h-full ${tether.taut ? 'bg-amber-400/80' : 'bg-emerald-400/60'}`}
+                style={{ width: `${Math.min(100, (tether.out / TETHER_LENGTH) * 100)}%` }}
+              />
+            </div>
+            <p className="mono mt-1.5 text-[10px] uppercase tracking-[0.16em] text-white/45">
+              {tether.taut ? 'Tether taut' : tether.grip ? 'Hand on a rail' : 'Free floating'}
+            </p>
+            <p className="mono mt-1 text-[9.5px] uppercase tracking-[0.14em] text-white/30">
+              WASD · Space up · Shift down
+            </p>
+          </div>
         )}
 
         {/* Mission briefing, legible in fullscreen as well. */}
@@ -580,6 +855,58 @@ export function FlightDeck() {
           </button>
         )}
 
+        {/* EVA screens. Shown over the station rather than instead of it, so
+            a crew member stays where they are while reading one. */}
+        {evaPanel && (
+          <div className="absolute inset-y-0 right-0 z-20 flex w-[min(100%,26rem)] flex-col border-l border-border bg-bg/95 backdrop-blur-sm">
+            <button
+              onClick={() => setEvaPanel(null)}
+              className="flex items-center gap-2 border-b border-border px-3 py-2 text-left hover:bg-fg/5"
+            >
+              <X className="h-3.5 w-3.5 text-muted" />
+              <span className="mono text-[10px] uppercase tracking-[0.18em] text-muted">Close · Esc</span>
+            </button>
+            <div className="min-h-0 flex-1">
+              {evaPanel === 'suit' && <SuitPanel prep={prep} onChange={setPrep} />}
+              {evaPanel === 'airlock' && (
+                <AirlockPanel
+                  airlock={airlock}
+                  ready={prepComplete(prep)}
+                  onCommand={(c) => runCommandRef.current?.(c)}
+                />
+              )}
+              {evaPanel === 'post' && (
+                <PostEvaPanel
+                  seconds={airlock.evaSeconds}
+                  steps={evaSteps}
+                  onReview={() => {
+                    // The review itself is a procedure at the medical console;
+                    // this only takes the crew member there. The task closes
+                    // when its steps are performed, not when it is opened.
+                    setEvaPanel(null)
+                    openStationRef.current?.('medical')
+                  }}
+                />
+              )}
+              {evaPanel && EVA_TASK_BY_ID[evaPanel as EvaTaskId] && (
+                <WorksitePanel
+                  task={EVA_TASK_BY_ID[evaPanel as EvaTaskId]}
+                  done={evaSteps}
+                  tools={prep.tools}
+                  onStep={(key) => {
+                    setEvaSteps((prev) => {
+                      if (prev.includes(key)) return prev
+                      const next = [...prev, key]
+                      saveSteps([...procDone, ...next])
+                      return next
+                    })
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
         {status === 'loading' && (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="annotate text-white/50">BRINGING THE STATION UP…</p>
@@ -604,7 +931,19 @@ export function FlightDeck() {
         )}
 
         {/* The console screen, shown in place once the camera has settled. */}
-        {open && <StationModal id={open} onClose={closeStation} onLeave={leave} onTask={markTask} zoomed />}
+        {open && (
+          <StationModal
+            id={open}
+            onClose={closeStation}
+            onLeave={leave}
+            onTask={markTask}
+            zoomed
+            procDone={procDone}
+            onProcStep={markProcStep}
+            evaDone={airlock.evaSeconds > 0}
+            evaSeconds={airlock.evaSeconds}
+          />
+        )}
       </div>
 
       {!touch && !full && (
@@ -637,12 +976,20 @@ function StationModal({
   onLeave,
   onTask,
   zoomed,
+  procDone,
+  onProcStep,
+  evaDone,
+  evaSeconds,
 }: {
   id: StationId
   onClose: () => void
   onLeave: (page: PageId) => void
   onTask: (t: TaskId) => void
   zoomed: boolean
+  procDone: readonly string[]
+  onProcStep: (key: string) => void
+  evaDone: boolean
+  evaSeconds: number
 }) {
   const s = STATION_BY_ID[id]
   useEffect(() => {
@@ -680,7 +1027,15 @@ function StationModal({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          <StationContent id={id} onLeave={onLeave} onTask={onTask} />
+          <StationContent
+            id={id}
+            onLeave={onLeave}
+            onTask={onTask}
+            procDone={procDone}
+            onProcStep={onProcStep}
+            evaDone={evaDone}
+            evaSeconds={evaSeconds}
+          />
         </div>
         <div className="flex items-center gap-3 border-t border-white/10 px-5 py-2.5">
           <p className="mono text-[10px] uppercase tracking-[0.18em] text-white/35">

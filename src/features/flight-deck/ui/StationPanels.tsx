@@ -10,6 +10,8 @@ import type { RadiationScenario, ScenarioParams } from '../../../types'
 import { Button } from '../../../components/ui/Button'
 import type { StationId } from '../model/deck'
 import type { TaskId } from '../model/objectives'
+import { PROCEDURES_AT } from '../model/procedures'
+import { ProcedurePanel } from './ProcedurePanel'
 
 /**
  * The console screens, as DOM over the canvas.
@@ -570,15 +572,46 @@ export function StationContent({
   id,
   onLeave,
   onTask,
+  procDone,
+  onProcStep,
+  evaDone,
+  evaSeconds,
 }: {
   id: StationId
   onLeave: (page: 'signal-veil' | 'crew-health' | 'early-warning' | 'simulator') => void
   onTask: (t: TaskId) => void
+  /** Completed procedure step keys. */
+  procDone: readonly string[]
+  onProcStep: (key: string) => void
+  evaDone: boolean
+  evaSeconds: number
 }) {
-  if (id === 'navigation') return <Navigation />
-  if (id === 'medical') return <Medical onLeave={onLeave} onTask={onTask} />
-  if (id === 'crew') return <Crew onTask={onTask} />
-  if (id === 'environment') return <Environment onLeave={onLeave} onTask={onTask} />
-  if (id === 'research') return <Research onLeave={onLeave} onTask={onTask} />
-  return <Comms />
+  // Every console keeps the instruments it had; the procedures are added
+  // underneath them, at the console where each belongs.
+  const body =
+    id === 'navigation' ? <Navigation />
+    : id === 'medical' ? <Medical onLeave={onLeave} onTask={onTask} />
+    : id === 'crew' ? <Crew onTask={onTask} />
+    : id === 'environment' ? <Environment onLeave={onLeave} onTask={onTask} />
+    : id === 'research' ? <Research onLeave={onLeave} onTask={onTask} />
+    : <Comms />
+
+  const procs = PROCEDURES_AT(id)
+  return (
+    <div>
+      {body}
+      {procs.length > 0 && (
+        <div className="mt-6 border-t border-white/10 pt-5">
+          <ProcedurePanel
+            at={id}
+            done={procDone}
+            onStep={onProcStep}
+            onTask={onTask}
+            evaDone={evaDone}
+            evaSeconds={evaSeconds}
+          />
+        </div>
+      )}
+    </div>
+  )
 }

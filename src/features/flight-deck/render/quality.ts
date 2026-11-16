@@ -37,14 +37,23 @@ export interface Quality {
    * reduced to fit rather than letting the frame rate collapse.
    */
   maxPixels: number
-  /** Fraction of the interior's resolution the planet is rendered at. */
+  /**
+   * Fraction of the frame's resolution the planet is drawn at before being
+   * brought up to size. The planet has no hard edges in it, so this costs
+   * almost nothing visually and saves the square of itself in fill.
+   */
   skyScale: number
   /** Shadow map edge, in texels. 0 disables the sun shadow entirely. */
   shadowSize: number
   /** Percentage-closer-filter taps: 1 is a hard edge, 9 is a soft one. */
   pcf: 1 | 9
-  /** Fixtures considered per fragment. */
-  maxLights: number
+  /**
+   * Fixtures sent to the shader for their specular highlight, at most 4.
+   * The diffuse contribution of every fixture is baked into the vertices, so
+   * this no longer controls how brightly the vessel is lit — only how many
+   * moving highlights it carries.
+   */
+  maxLights: 1 | 2 | 4
   /** Octaves on the planet's terrain and cloud noise. */
   planetOctaves: number
 }
@@ -57,7 +66,7 @@ export const QUALITY: Record<QualityName, Quality> = {
     skyScale: 0.4,
     shadowSize: 0,
     pcf: 1,
-    maxLights: 6,
+    maxLights: 1,
     planetOctaves: 4,
   },
   medium: {
@@ -67,7 +76,7 @@ export const QUALITY: Record<QualityName, Quality> = {
     skyScale: 0.55,
     shadowSize: 1024,
     pcf: 1,
-    maxLights: 10,
+    maxLights: 2,
     planetOctaves: 5,
   },
   high: {
@@ -77,7 +86,7 @@ export const QUALITY: Record<QualityName, Quality> = {
     skyScale: 0.7,
     shadowSize: 2048,
     pcf: 9,
-    maxLights: 16,
+    maxLights: 4,
     planetOctaves: 7,
   },
 }
@@ -151,6 +160,15 @@ export class QualityGovernor {
   private fastRun = 0
   private slowRun = 0
   private settled = 0
+  /**
+   * Presets this governor has already had to retreat from. Climbing back into
+   * one is what produces a picture that pulses, because the conditions that
+   * forced the retreat are usually still there — so each return trip is made
+   * harder than the last. Without this, a machine sitting near the threshold
+   * oscillates indefinitely: the step up pushes the frame time over the line,
+   * the step down brings it back under, and nothing ever settles.
+   */
+  private demotions = new Map<QualityName, number>()
 
   /** Frames to wait after a change before trusting the average again. */
   private static readonly SETTLE = 24
@@ -192,14 +210,22 @@ export class QualityGovernor {
       if (++this.slowRun > QualityGovernor.SLOW_RUN && i > 0) {
         this.slowRun = 0
         this.settled = 0
+        this.demotions.set(current, (this.demotions.get(current) ?? 0) + 1)
         return QUALITY_ORDER[i - 1]
       }
     } else if (this.avg < QualityGovernor.FAST_MS) {
       this.slowRun = 0
-      if (++this.fastRun > QualityGovernor.FAST_RUN && i < QUALITY_ORDER.length - 1) {
+      const up = QUALITY_ORDER[i + 1]
+      // Each failed attempt at a preset trebles how long the machine must look
+      // comfortable before it is offered again, and after three it is dropped
+      // for the session. Three climbs is enough to tell a passing hitch from a
+      // machine that cannot hold the preset.
+      const tries = up ? (this.demotions.get(up) ?? 0) : 0
+      const need = QualityGovernor.FAST_RUN * Math.pow(3, tries)
+      if (++this.fastRun > need && i < QUALITY_ORDER.length - 1 && tries < 3) {
         this.fastRun = 0
         this.settled = 0
-        return QUALITY_ORDER[i + 1]
+        return up
       }
     } else {
       this.slowRun = 0

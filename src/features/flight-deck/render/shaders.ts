@@ -57,7 +57,8 @@ export const DEPTH_VERT = /* glsl */ `#version 300 es
 precision highp float;
 layout(location = 0) in vec3 aPos;
 uniform mat4 uLightViewProj;
-void main() { gl_Position = uLightViewProj * vec4(aPos, 1.0); }`
+uniform mat4 uModel;
+void main() { gl_Position = uLightViewProj * uModel * vec4(aPos, 1.0); }`
 
 export const DEPTH_FRAG = /* glsl */ `#version 300 es
 precision highp float;
@@ -221,23 +222,30 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec3 aColor;
 layout(location = 3) in vec3 aMat;
+layout(location = 4) in vec3 aIrradiance;
 
 uniform mat4 uViewProj;
 uniform mat4 uLightViewProj;
+// Identity for the hull, which never moves. Set only for the hatch leaves,
+// which are the one piece of geometry in the vessel that does.
+uniform mat4 uModel;
 
 out vec3 vPos;
 out vec3 vNormal;
 out vec3 vColor;
 out vec3 vMat;
+out vec3 vIrr;
 out vec4 vLightPos;
 
 void main() {
-  vPos = aPos;
-  vNormal = aNormal;
+  vec4 world = uModel * vec4(aPos, 1.0);
+  vPos = world.xyz;
+  vNormal = mat3(uModel) * aNormal;
   vColor = aColor;
   vMat = aMat;
-  vLightPos = uLightViewProj * vec4(aPos, 1.0);
-  gl_Position = uViewProj * vec4(aPos, 1.0);
+  vIrr = aIrradiance;
+  vLightPos = uLightViewProj * world;
+  gl_Position = uViewProj * world;
 }`
 
 export const SCENE_FRAG = /* glsl */ `#version 300 es
@@ -248,12 +256,16 @@ in vec3 vPos;
 in vec3 vNormal;
 in vec3 vColor;
 in vec3 vMat;
+in vec3 vIrr;
 in vec4 vLightPos;
 out vec4 outColor;
 
 ${PBR_COMMON}
 
-const int MAX_LIGHTS = 16;
+// Only the fixtures nearest the eye are sent now, and only so that their
+// specular highlight can move with the viewer. The diffuse half of every
+// fixture in the vessel arrives already summed, in vIrr.
+const int MAX_LIGHTS = 4;
 uniform vec3 uLightPos[MAX_LIGHTS];
 uniform vec3 uLightCol[MAX_LIGHTS];
 uniform int uLightCount;
@@ -315,25 +327,36 @@ void main() {
     }
   }
 
-  // Interior fixtures.
-  for (int i = 0; i < MAX_LIGHTS; i++) {
-    if (i >= uLightCount || i >= uMaxLights) break;
-    vec3 d = uLightPos[i] - vPos;
-    float dist2 = max(dot(d, d), 1e-4);
-    // The vessel is forty metres long, so most fixtures are nowhere near any
-    // given fragment. Attenuation at this range is already down to about three
-    // per cent, so culling here is free visually and skips the whole BRDF.
-    if (dist2 > 90.0) continue;
-    vec3 Li = d * inversesqrt(dist2);
-    float nl = max(dot(N, Li), 0.0);
-    if (nl <= 0.0) continue;
-    float atten = 1.0 / (1.0 + dist2 * 0.33);
-    vec3 H = normalize(Li + V);
-    float D = distributionGGX(N, H, rough);
-    float G = geometrySmith(ndv, nl, rough);
-    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), f0);
-    vec3 spec = (D * G * F) / max(4.0 * ndv * nl, 1e-4);
-    lo += (kd / PI + spec) * uLightCol[i] * nl * atten;
+  // Interior fixtures, diffuse half: summed at build time over every fixture
+  // in the vessel, with visibility, and interpolated across the triangle.
+  // This replaced a sixteen-iteration per-pixel loop that profiling put at
+  // 85 per cent of this pass.
+  lo += kd / PI * vIrr;
+
+  // Interior fixtures, specular half. This cannot be baked, because the
+  // highlight sits where the eye happens to be. It is also only visible on
+  // surfaces smooth enough to hold one, so the whole block is skipped on the
+  // painted rack faces that make up most of the station's area — a branch the
+  // hardware takes coherently, since roughness varies per surface and not per
+  // pixel. What remains is the handful of fixtures nearest the eye, which is
+  // all that can produce a highlight a viewer would notice.
+  float gloss = (1.0 - rough) * (0.35 + 0.65 * metal);
+  if (gloss > 0.06) {
+    for (int i = 0; i < MAX_LIGHTS; i++) {
+      if (i >= uLightCount || i >= uMaxLights) break;
+      vec3 d = uLightPos[i] - vPos;
+      float dist2 = max(dot(d, d), 1e-4);
+      if (dist2 > 90.0) continue;
+      vec3 Li = d * inversesqrt(dist2);
+      float nl = max(dot(N, Li), 0.0);
+      if (nl <= 0.0) continue;
+      vec3 H = normalize(Li + V);
+      float D = distributionGGX(N, H, rough);
+      float G = geometrySmith(ndv, nl, rough);
+      vec3 F = fresnelSchlick(max(dot(H, V), 0.0), f0);
+      vec3 spec = (D * G * F) / max(4.0 * ndv * nl, 1e-4);
+      lo += spec * uLightCol[i] * nl * (1.0 / (1.0 + dist2 * 0.33));
+    }
   }
 
   // Ambient: a hemisphere standing in for bounce off the white rack faces,
@@ -353,6 +376,26 @@ void main() {
   col = tonemapACES(col * 1.08);
   col = pow(col, vec3(0.4545));
   outColor = vec4(col, 1.0);
+}`
+
+// --------------------------------------------------------- sky composite
+/**
+ * Puts the offscreen planet onto the frame.
+ *
+ * The planet is drawn into a smaller target and brought up to size here. It
+ * can afford that because it is the one thing in the frame with no hard edges
+ * in it: an ocean, a cloud deck and a limb, all low frequency, seen through a
+ * pane at least a few metres away. The structure around the panes is drawn at
+ * full resolution and is unaffected, so the window frames stay sharp while the
+ * view through them costs a fraction of what it did.
+ */
+export const SKY_COMPOSITE_FRAG = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vNdc;
+uniform sampler2D uSky;
+out vec4 outColor;
+void main() {
+  outColor = vec4(texture(uSky, vNdc * 0.5 + 0.5).rgb, 1.0);
 }`
 
 // ---------------------------------------------------------------- emissive
