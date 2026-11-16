@@ -1,8 +1,8 @@
 import { CUPOLA, DOORS, ROOMS, STATIONS, inside, type Room } from '../model/deck'
 import { FIXTURES, FIXTURE_RANGE2, attenuation } from './fixtures'
 import {
-  airlockChamber, auxComputers, cableRuns, commandArea, evaPrepRoom, exerciseStation,
-  galley, hatchLeaf, hatchSurround,
+  airlockChamber, auxComputers, cableRuns, commandArea, environmentRack, evaPrepRoom,
+  exerciseStation, galley, hatchLeaf, hatchSurround, medicalBay,
 } from './outfitting'
 
 /**
@@ -687,6 +687,8 @@ export function buildStructure(): MeshData {
   evaPrepRoom(b)
   airlockChamber(b)
   galley(b)
+  medicalBay(b)
+  environmentRack(b)
   exerciseStation(b)
   commandArea(b)
   auxComputers(b)

@@ -24,6 +24,7 @@ import {
   type TaskId,
 } from './model/objectives'
 import { ALL_PROC_STEPS } from './model/procedures'
+import { entryOverlay } from './model/overlay'
 import { StationContent } from './ui/StationPanels'
 
 const EYE = 1.62
@@ -589,6 +590,18 @@ export function FlightDeck() {
   /** Outside the hull exactly while the spacewalk is live. */
   const outside = airlock.state === 'eva-active'
 
+  // Which entry overlay to show, if any. The rule lives in its own module and
+  // is tested exhaustively, because tying it to pointer lock is the mistake
+  // that made STEP ABOARD keep coming back.
+  const overlay = entryOverlay({
+    entered,
+    locked,
+    consoleOpen: open !== null,
+    evaOpen: evaPanel !== null,
+    flying,
+    touch,
+  })
+
   // Escape closes an EVA screen, as it closes a console.
   useEffect(() => {
     if (!evaPanel) return
@@ -829,7 +842,7 @@ export function FlightDeck() {
         )}
 
         {/* The entry plate, once. After that the station stays where it was. */}
-        {!entered && !locked && !open && !flying && !touch && (
+        {overlay === 'plate' && (
           <button
             onClick={() => canvasRef.current?.requestPointerLock?.()}
             className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 text-center backdrop-blur-[2px]"
@@ -846,7 +859,7 @@ export function FlightDeck() {
         )}
 
         {/* Afterwards: a quiet prompt that does not cover the station. */}
-        {entered && !locked && !open && !flying && !touch && (
+        {overlay === 'prompt' && (
           <button
             onClick={() => canvasRef.current?.requestPointerLock?.()}
             className="absolute bottom-4 left-1/2 -translate-x-1/2 border border-white/15 bg-black/60 px-3 py-1.5 backdrop-blur-sm transition-colors hover:border-white/35"

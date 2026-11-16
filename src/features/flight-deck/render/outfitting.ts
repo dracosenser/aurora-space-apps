@@ -729,6 +729,173 @@ export function auxComputers(b: Builder): void {
   for (const [x, y, z, f] of spots) auxWorkstation(b, x, y, z, f, true)
 }
 
+// ===================================================== medical operations
+/**
+ * The medical bay's physical equipment.
+ *
+ * Each item here is something a procedure in `model/procedures.ts` refers to,
+ * so the bay contains the instruments the console claims to use rather than a
+ * generic set of boxes: a cuff on its arm board, an ECG unit with its lead
+ * set, an ultrasound on a swing arm, a medication locker with a visible seal,
+ * two portable kits at their stowage points, and a sample cold stowage unit.
+ */
+export function medicalBay(b: Builder): void {
+  const r = ROOMS.find((x) => x.id === 'medical')
+  if (!r) return
+  const wz = r.z1 - 0.1
+  /** Wall-local: u along the module from its outboard wall, d out from the wall. */
+  const M = (u: number, y: number, d: number): P3 => [r.x1 - 0.6 - u, y, wz - d]
+  const mbox = (u0: number, y0: number, d0: number, u1: number, y1: number, d1: number, c: Rgb, m: Mat) =>
+    b.box(...boxPts(M(u0, y0, d0), M(u1, y1, d1)), c, m)
+
+  // ---- examination surface with restraints, where a crew member is worked on
+  mbox(0.0, 0.72, 0.1, 1.9, 0.78, 0.86, ALLOY, [0.44, 0.65, 1])
+  for (const u of [0.25, 1.65]) mbox(u - 0.04, 0.0, 0.7, u + 0.04, 0.72, 0.78, ALLOY, M_METAL)
+  // Padded section and two body restraint straps.
+  mbox(0.35, 0.78, 0.16, 1.55, 0.83, 0.8, SEAT, M_SOFT)
+  for (const u of [0.6, 1.3]) mbox(u, 0.83, 0.14, u + 0.07, 0.86, 0.82, BAG_2, M_SOFT)
+  // Foot restraints for whoever is doing the examining.
+  mbox(0.5, 0.02, 0.95, 1.4, 0.07, 1.45, GRATE, M_SOFT)
+
+  // ---- blood pressure unit: monitor, cuff on an arm board, tubing
+  mbox(0.05, 0.9, 0.0, 0.5, 1.26, 0.36, PANEL, M_PANEL)
+  b.quad(M(0.12, 1.0, 0.37), M(0.12, 1.18, 0.37), M(0.43, 1.18, 0.37), M(0.43, 1.0, 0.37), DARKMETAL, [0.3, 0.3, 1])
+  mbox(0.1, 0.84, 0.4, 0.46, 0.88, 0.76, ALLOY, M_METAL)
+  mbox(0.16, 0.88, 0.46, 0.4, 0.96, 0.7, FABRIC_DK, M_SOFT)
+  mbox(0.26, 0.9, 0.36, 0.3, 0.94, 0.46, CABLE, M_RUBBER)
+
+  // ---- ECG unit with its lead set hung beside it
+  mbox(0.6, 0.9, 0.0, 1.1, 1.3, 0.34, PANEL_2, M_PANEL)
+  b.quad(M(0.66, 1.02, 0.35), M(0.66, 1.24, 0.35), M(1.04, 1.24, 0.35), M(1.04, 1.02, 0.35), DARKMETAL, [0.3, 0.3, 1])
+  for (let i = 0; i < 5; i++) mbox(0.66 + i * 0.08, 0.93, 0.33, 0.71 + i * 0.08, 0.98, 0.37, i === 0 ? GREEN_L : ALLOY, M_METAL)
+  // Four leads, coiled on a hook.
+  mbox(1.14, 1.16, 0.06, 1.18, 1.22, 0.14, ALLOY, M_METAL)
+  for (let i = 0; i < 4; i++) {
+    for (let k = 0; k < 8; k++) {
+      const a0 = (k / 8) * Math.PI * 2
+      const a1 = ((k + 1) / 8) * Math.PI * 2
+      const rr = 0.05 + i * 0.012
+      b.quad(
+        M(1.16 + Math.cos(a0) * rr, 1.05 + Math.sin(a0) * rr, 0.1),
+        M(1.16 + Math.cos(a1) * rr, 1.05 + Math.sin(a1) * rr, 0.1),
+        M(1.16 + Math.cos(a1) * rr, 1.05 + Math.sin(a1) * rr, 0.112),
+        M(1.16 + Math.cos(a0) * rr, 1.05 + Math.sin(a0) * rr, 0.112),
+        i % 2 ? CABLE : GRATE, M_RUBBER,
+      )
+    }
+  }
+
+  // ---- ultrasound on a swing arm, with its probe in a holster
+  mbox(1.35, 1.3, 0.0, 1.45, 1.9, 0.1, ALLOY, M_METAL)
+  mbox(1.45, 1.74, 0.04, 2.0, 1.82, 0.12, ALLOY, M_METAL)
+  mbox(1.86, 1.4, 0.02, 2.22, 1.76, 0.3, PANEL, M_PANEL)
+  b.quad(M(1.92, 1.46, 0.31), M(1.92, 1.7, 0.31), M(2.16, 1.7, 0.31), M(2.16, 1.46, 0.31), DARKMETAL, [0.28, 0.3, 1])
+  mbox(2.26, 1.46, 0.06, 2.34, 1.66, 0.16, GRATE, M_SOFT)
+  mbox(2.28, 1.5, 0.16, 2.32, 1.64, 0.22, DARKMETAL, M_RUBBER)
+
+  // ---- medication locker: a sealed cabinet with a labelled door and a seal
+  mbox(2.5, 0.95, 0.0, 3.4, 1.95, 0.5, PANEL_2, M_PANEL)
+  b.quad(M(2.56, 1.02, 0.51), M(2.56, 1.88, 0.51), M(3.34, 1.88, 0.51), M(3.34, 1.02, 0.51), PANEL, M_PANEL)
+  mbox(3.22, 1.38, 0.51, 3.3, 1.52, 0.57, ALLOY, M_METAL)
+  // Tamper seal across the opening edge, and the placard.
+  mbox(2.54, 1.42, 0.5, 2.6, 1.48, 0.54, AMBER_L, M_SOFT)
+  b.quad(M(2.66, 1.7, 0.52), M(2.66, 1.82, 0.52), M(3.14, 1.82, 0.52), M(3.14, 1.7, 0.52), LABEL, M_SOFT)
+
+  // ---- two portable medical kits at their stowage points
+  for (const [u, d] of [[3.6, 0.0], [4.2, 0.0]] as const) {
+    mbox(u, 1.0, d, u + 0.5, 1.4, d + 0.4, BAG, M_SOFT)
+    mbox(u + 0.04, 1.37, d + 0.04, u + 0.46, 1.42, d + 0.36, ALLOY, M_METAL)
+    b.quad(M(u + 0.1, 1.08, d + 0.41), M(u + 0.1, 1.2, d + 0.41), M(u + 0.4, 1.2, d + 0.41), M(u + 0.4, 1.08, d + 0.41), LABEL, M_SOFT)
+    // Retaining strap, because a kit that floats off is no kit at all.
+    mbox(u + 0.2, 0.98, d - 0.02, u + 0.28, 1.44, d + 0.42, BAG_2, M_SOFT)
+  }
+
+  // ---- sample cold stowage, with its own compressor and a readout
+  mbox(3.6, 0.1, 0.0, 4.6, 0.92, 0.6, PANEL_2, M_PANEL)
+  mbox(3.66, 0.16, 0.6, 4.54, 0.86, 0.66, PANEL, M_PANEL)
+  mbox(4.3, 0.44, 0.66, 4.44, 0.58, 0.72, ALLOY, M_METAL)
+  b.quad(M(3.78, 0.62, 0.67), M(3.78, 0.76, 0.67), M(4.12, 0.76, 0.67), M(4.12, 0.62, 0.67), DARKMETAL, [0.3, 0.3, 1])
+  mbox(3.7, 0.0, 0.1, 4.5, 0.12, 0.5, GRATE, M_METAL)
+
+  // ---- sharps and waste container, clearly marked, under the surface
+  mbox(1.1, 0.1, 0.95, 1.4, 0.5, 1.3, PANEL, M_PANEL)
+  mbox(1.1, 0.5, 0.95, 1.4, 0.54, 1.3, AMBER_L, M_SOFT)
+
+  // ---- glove and mask dispensers on the wall above the surface
+  for (let i = 0; i < 2; i++) {
+    mbox(0.1 + i * 0.5, 1.9, 0.0, 0.52 + i * 0.5, 2.18, 0.2, PANEL, M_PANEL)
+    mbox(0.16 + i * 0.5, 1.94, 0.2, 0.46 + i * 0.5, 2.06, 0.24, i ? BAG_2 : [0.26, 0.3, 0.34], M_SOFT)
+  }
+}
+
+/**
+ * Environmental control: the water processing rack with the filter housing
+ * that one of the procedures replaces, plus the atmosphere hardware.
+ */
+export function environmentRack(b: Builder): void {
+  const r = ROOMS.find((x) => x.id === 'environment')
+  if (!r) return
+  const wz = r.z1 - 0.1
+  const E = (u: number, y: number, d: number): P3 => [r.x0 + 0.6 + u, y, wz - d]
+  const ebox = (u0: number, y0: number, d0: number, u1: number, y1: number, d1: number, c: Rgb, m: Mat) =>
+    b.box(...boxPts(E(u0, y0, d0), E(u1, y1, d1)), c, m)
+
+  // ---- water processing rack: tanks, pump, filter housing, pipework
+  ebox(0, 0.1, 0.0, 1.5, 2.1, 0.55, PANEL_2, M_PANEL)
+  // Two tanks, upright, with level sight glasses.
+  for (const u of [0.18, 0.72]) {
+    for (let k = 0; k < 10; k++) {
+      const a0 = (k / 10) * Math.PI * 2
+      const a1 = ((k + 1) / 10) * Math.PI * 2
+      const rr = 0.2
+      b.quad(
+        E(u + 0.22 + Math.cos(a0) * rr, 0.3, 0.55 + Math.sin(a0) * rr * 0.45),
+        E(u + 0.22 + Math.cos(a0) * rr, 1.25, 0.55 + Math.sin(a0) * rr * 0.45),
+        E(u + 0.22 + Math.cos(a1) * rr, 1.25, 0.55 + Math.sin(a1) * rr * 0.45),
+        E(u + 0.22 + Math.cos(a1) * rr, 0.3, 0.55 + Math.sin(a1) * rr * 0.45),
+        ALLOY, M_METAL,
+      )
+    }
+    ebox(u + 0.2, 0.35, 0.72, u + 0.24, 1.2, 0.76, GLASS, M_GLASS)
+  }
+  // The filter housing — the part a procedure takes off and replaces.
+  ebox(0.26, 1.42, 0.55, 0.74, 1.92, 0.95, ALLOY, M_METAL)
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2
+    ebox(0.5 + Math.cos(a) * 0.2 - 0.03, 1.67 + Math.sin(a) * 0.2 - 0.03, 0.95,
+         0.5 + Math.cos(a) * 0.2 + 0.03, 1.67 + Math.sin(a) * 0.2 + 0.03, 1.0, ALLOY, M_METAL)
+  }
+  ebox(0.42, 1.59, 1.0, 0.58, 1.75, 1.04, DARKMETAL, M_RUBBER)
+  b.quad(E(0.3, 1.96, 0.6), E(0.3, 2.06, 0.6), E(0.7, 2.06, 0.6), E(0.7, 1.96, 0.6), LABEL, M_SOFT)
+  // Isolation valves either side of the housing, which the procedure shuts.
+  for (const u of [0.18, 0.84]) {
+    ebox(u - 0.05, 1.3, 0.62, u + 0.05, 1.42, 0.72, ALLOY, M_METAL)
+    ebox(u - 0.11, 1.38, 0.66, u + 0.11, 1.44, 0.76, RAIL, M_RAIL)
+  }
+  // Pipework from the tanks up through the housing and away.
+  for (const [u, col] of [[0.22, ALLOY], [0.88, ALLOY]] as const) {
+    ebox(u - 0.035, 1.25, 0.6, u + 0.035, 1.46, 0.67, col as Rgb, M_METAL)
+  }
+  ebox(0.1, 1.9, 0.58, 1.4, 1.96, 0.65, ALLOY, M_METAL)
+  // Pump with its mounts, and a dark grille over it.
+  ebox(1.0, 0.5, 0.55, 1.42, 0.95, 0.9, PANEL, M_PANEL)
+  ebox(1.04, 0.54, 0.9, 1.38, 0.91, 0.93, GRATE, M_SOFT)
+
+  // ---- potable water dispensing point, where a sample is drawn
+  ebox(1.7, 1.1, 0.0, 2.2, 1.6, 0.34, PANEL, M_PANEL)
+  ebox(1.88, 1.16, 0.34, 1.98, 1.24, 0.44, ALLOY, M_METAL)
+  b.quad(E(1.76, 1.32, 0.35), E(1.76, 1.46, 0.35), E(2.14, 1.46, 0.35), E(2.14, 1.32, 0.35), DARKMETAL, [0.3, 0.3, 1])
+  // Sample pouches in a holder below it.
+  ebox(1.76, 0.86, 0.06, 2.14, 1.06, 0.3, GRATE, M_SOFT)
+  for (let i = 0; i < 3; i++) ebox(1.8 + i * 0.12, 0.9, 0.1, 1.88 + i * 0.12, 1.04, 0.26, BAG_2, M_SOFT)
+
+  // ---- atmosphere: scrubber bed and a sensor head on the wall
+  ebox(2.4, 0.3, 0.0, 3.3, 1.5, 0.5, PANEL_2, M_PANEL)
+  for (let i = 0; i < 5; i++) ebox(2.48, 0.4 + i * 0.22, 0.5, 3.22, 0.56 + i * 0.22, 0.54, GRATE, M_SOFT)
+  ebox(2.7, 1.6, 0.06, 2.9, 1.78, 0.2, ALLOY, M_METAL)
+  ebox(2.74, 1.64, 0.2, 2.86, 1.74, 0.26, DARKMETAL, M_SOFT)
+}
+
 // ================================================== cable runs and stowage
 /**
  * Cable runs.

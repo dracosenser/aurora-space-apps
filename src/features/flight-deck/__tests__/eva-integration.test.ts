@@ -14,6 +14,7 @@ import {
 } from '../model/procedures'
 import { ALL_TASKS, OBJECTIVES } from '../model/objectives'
 import { SUITS } from '../model/suit'
+import { entryOverlay, type OverlayState } from '../model/overlay'
 import type { Astronaut, DailyRecord } from '../../../types'
 
 const RADIUS = 0.34
@@ -352,6 +353,77 @@ describe('suits', () => {
       expect(s.x).toBeLessThan(r.x1)
       expect(s.z).toBeGreaterThan(r.z0)
       expect(s.z).toBeLessThan(r.z1)
+    }
+  })
+})
+
+describe('the entry overlay', () => {
+  /** Every combination of the six inputs. */
+  const all: OverlayState[] = []
+  for (let i = 0; i < 64; i++) {
+    all.push({
+      entered: !!(i & 1), locked: !!(i & 2), consoleOpen: !!(i & 4),
+      evaOpen: !!(i & 8), flying: !!(i & 16), touch: !!(i & 32),
+    })
+  }
+
+  it('never appears while a console is open', () => {
+    for (const s of all.filter((x) => x.consoleOpen)) {
+      expect(entryOverlay(s), JSON.stringify(s)).toBe('none')
+    }
+  })
+
+  it('never appears while an EVA screen is open', () => {
+    // This is the one that regressed: opening a suit rack or the airlock
+    // releases the pointer deliberately, exactly as a console does.
+    for (const s of all.filter((x) => x.evaOpen)) {
+      expect(entryOverlay(s), JSON.stringify(s)).toBe('none')
+    }
+  })
+
+  it('never appears while the camera is flying', () => {
+    for (const s of all.filter((x) => x.flying)) {
+      expect(entryOverlay(s), JSON.stringify(s)).toBe('none')
+    }
+  })
+
+  it('never appears on a touch device', () => {
+    for (const s of all.filter((x) => x.touch)) {
+      expect(entryOverlay(s), JSON.stringify(s)).toBe('none')
+    }
+  })
+
+  it('never appears while the pointer is captured', () => {
+    for (const s of all.filter((x) => x.locked)) {
+      expect(entryOverlay(s), JSON.stringify(s)).toBe('none')
+    }
+  })
+
+  it('shows the full plate only before anyone has ever taken the controls', () => {
+    for (const s of all) {
+      if (entryOverlay(s) === 'plate') expect(s.entered, JSON.stringify(s)).toBe(false)
+    }
+  })
+
+  it('shows the quiet prompt once the controls have been taken and released', () => {
+    expect(entryOverlay({
+      entered: true, locked: false, consoleOpen: false, evaOpen: false, flying: false, touch: false,
+    })).toBe('prompt')
+  })
+
+  it('shows the plate on a first load with nothing open', () => {
+    expect(entryOverlay({
+      entered: false, locked: false, consoleOpen: false, evaOpen: false, flying: false, touch: false,
+    })).toBe('plate')
+  })
+
+  it('is never anything but none once the controls are taken, for any panel state', () => {
+    // The practical statement of the bug: having entered once, the only thing
+    // that can ever put an overlay back is releasing the pointer with nothing
+    // open at all.
+    const shown = all.filter((s) => s.entered && entryOverlay(s) !== 'none')
+    for (const s of shown) {
+      expect(s.locked || s.consoleOpen || s.evaOpen || s.flying || s.touch, JSON.stringify(s)).toBe(false)
     }
   })
 })
