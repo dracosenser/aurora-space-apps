@@ -10,6 +10,7 @@ import { buildSnapshot } from './model/snapshot'
 import { AUTO_CLEAR_AT, BRUSH_RANGE, initialVeilState, veilReducer, type PanelId, type ReplayPlan } from './model/veilReducer'
 import { SignalVeilCanvas, type LensTarget } from './SignalVeilCanvas'
 import { DataTable } from './ui/DataTable'
+import { DataViews } from './ui/DataViews'
 import { HelmetFrame } from './ui/HelmetFrame'
 import { InsightPanel } from './ui/InsightPanel'
 import { NodeInspector } from './ui/NodeInspector'
@@ -519,6 +520,14 @@ export function SignalVeilExperience({
           </div>
         </aside>
       </div>
+
+      <DataViews
+        analysis={analysis}
+        day={state.day}
+        onPickDay={setDay}
+        onSelect={(id) => dispatch({ type: 'select', id })}
+        onConnect={(a, b) => dispatch({ type: 'connect', a, b })}
+      />
 
       {tableOpen && (
         <div className="panel mt-4 rounded-md p-4">
