@@ -83,7 +83,7 @@ const MissionContext = createContext<MissionState | null>(null)
 
 function pageFromHash(): PageId {
   const h = (window.location.hash || '').replace('#/', '').replace('#', '') as PageId
-  const valid: PageId[] = ['mission-control', 'crew-health', 'early-warning', 'self-check', 'signal-veil', 'flight-deck', 'simulator', 'assistant', 'sources', 'presentation']
+  const valid: PageId[] = ['mission-control', 'crew-health', 'early-warning', 'self-check', 'signal-veil', 'flight-deck', 'workbench', 'simulator', 'assistant', 'sources', 'presentation']
   return valid.includes(h) ? h : 'mission-control'
 }
 

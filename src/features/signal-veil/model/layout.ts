@@ -11,6 +11,9 @@ export const CATEGORY_COLORS: Record<string, string> = {
   cognitive: '#6fd3e8',
   activity: '#4fd0a6',
   behavioral: '#ffb84d',
+  vitals: '#f075a4',
+  environment: '#d9c27a',
+  custom: '#c7a2ff',
 }
 
 const FALLBACK_COLORS = ['#7aa7ff', '#c7a2ff', '#ff9153', '#4fd6c0', '#aacf63', '#f075a4']

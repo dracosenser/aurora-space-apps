@@ -43,6 +43,12 @@ export interface IndicatorDef {
   /** Smallest meaningful increment of the instrument; floors the robust scale. */
   resolution: number
   provenance: Provenance
+  /**
+   * 'context' marks a condition of the environment rather than of the person
+   * (cabin CO2, radiation dose). Context indicators get baselines and are tested
+   * for relationships, but are never counted as members of a joint health pattern.
+   */
+  role?: 'health' | 'context'
 }
 
 export interface MissionEventRecord {

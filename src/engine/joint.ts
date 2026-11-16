@@ -24,7 +24,8 @@ export interface JointModel {
 
 /** Estimate the baseline correlation of robust z between regularly sampled indicators. */
 export function buildJointModel(timelines: IndicatorTimeline[], cfg: EngineConfig): JointModel {
-  const eligible = timelines.filter((t) => !isSparse(t.def))
+  // Regularly sampled measurements of the person; environmental context is excluded.
+  const eligible = timelines.filter((t) => !isSparse(t.def) && t.def.role !== 'context')
   const windowEnd = Math.max(cfg.baseline.mode === 'rolling' ? 60 : 0, ...eligible.map((t) => t.referenceEnd), cfg.baseline.referenceDays)
   const n = eligible.length
   const corr: number[][] = []

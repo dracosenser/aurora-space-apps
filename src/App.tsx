@@ -10,6 +10,7 @@ import { MissionControl } from './pages/MissionControl'
 const SelfCheck = lazy(() => import('./pages/SelfCheck').then((m) => ({ default: m.SelfCheck })))
 const SignalVeil = lazy(() => import('./pages/SignalVeil').then((m) => ({ default: m.SignalVeil })))
 const FlightDeckPage = lazy(() => import('./pages/FlightDeckPage').then((m) => ({ default: m.FlightDeckPage })))
+const Workbench = lazy(() => import('./pages/Workbench').then((m) => ({ default: m.Workbench })))
 const CrewHealth = lazy(() => import('./pages/CrewHealth').then((m) => ({ default: m.CrewHealth })))
 const EarlyWarning = lazy(() => import('./pages/EarlyWarning').then((m) => ({ default: m.EarlyWarning })))
 const Simulator = lazy(() => import('./pages/Simulator').then((m) => ({ default: m.Simulator })))
@@ -66,6 +67,7 @@ export default function App() {
                 {page === 'self-check' && <SelfCheck />}
               {page === 'signal-veil' && <SignalVeil />}
               {page === 'flight-deck' && <FlightDeckPage />}
+                {page === 'workbench' && <Workbench />}
                 {page === 'crew-health' && <CrewHealth />}
                 {page === 'early-warning' && <EarlyWarning />}
                 {page === 'simulator' && <Simulator />}
