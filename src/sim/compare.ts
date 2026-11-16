@@ -1,3 +1,4 @@
+import { scoreSeries } from './assess'
 import { EFFECT_BY_ID, ENV_PARAMS, SIM_INDICATORS, SIM_INDICATOR_BY_ID } from './reference'
 import { EVENT_TYPE_BY_ID } from './events'
 import type { MissionConfig, SimIndicator, SimulationResult } from './types'
@@ -81,33 +82,72 @@ export interface EffectDiff {
 }
 
 export interface AstronautComparison {
+  /** The astronaut in A (kept as the key for selection). */
   astronautId: string
+  /** The astronaut in B they are paired with. */
+  bId: string
   name: string
+  nameB: string
   indicators: IndicatorDiff[]
   effects: EffectDiff[]
 }
 
+export type Matching = 'id' | 'name' | 'position'
+
 export interface Comparison {
   comparable: boolean
   reason: string
+  /** How astronauts in A were paired with astronauts in B. */
+  matching: Matching
   days: number
   changes: InputChange[]
   astronauts: AstronautComparison[]
 }
 
+/**
+ * Pair the astronauts of two runs: by id (scenario copies), else by name, else
+ * by roster position, so two unrelated missions can still be compared.
+ */
+export function pairAstronauts(cfgA: MissionConfig, a: SimulationResult, cfgB: MissionConfig, b: SimulationResult): { pairs: [string, string][]; matching: Matching } {
+  const idsB = new Set(b.astronauts.map((r) => r.astronautId))
+  const byId = a.astronauts.filter((r) => idsB.has(r.astronautId)).map((r) => [r.astronautId, r.astronautId] as [string, string])
+  if (byId.length) return { pairs: byId, matching: 'id' }
+  const nameOf = (cfg: MissionConfig, id: string) => (cfg.crew.find((c) => c.id === id)?.name ?? '').trim().toLowerCase()
+  const used = new Set<string>()
+  const byName: [string, string][] = []
+  for (const ra of a.astronauts) {
+    const n = nameOf(cfgA, ra.astronautId)
+    const rb = n ? b.astronauts.find((r) => !used.has(r.astronautId) && nameOf(cfgB, r.astronautId) === n) : undefined
+    if (rb) {
+      used.add(rb.astronautId)
+      byName.push([ra.astronautId, rb.astronautId])
+    }
+  }
+  if (byName.length) return { pairs: byName, matching: 'name' }
+  const n = Math.min(a.astronauts.length, b.astronauts.length)
+  return { pairs: Array.from({ length: n }, (_, i) => [a.astronauts[i].astronautId, b.astronauts[i].astronautId] as [string, string]), matching: 'position' }
+}
+
 export function compareRuns(cfgA: MissionConfig, a: SimulationResult, cfgB: MissionConfig, b: SimulationResult): Comparison {
   const changes = inputChanges(cfgA, cfgB)
   const days = Math.min(a.days, b.days)
+  const { pairs, matching } = pairAstronauts(cfgA, a, cfgB, b)
+  const durations = a.days !== b.days ? ` Durations differ: days 1–${days} are compared day by day, and mission outcomes are taken at each mission's own end.` : ''
   const reason =
-    cfgA.seed !== cfgB.seed
-      ? 'The two scenarios use different random seeds, so part of every difference is random variation rather than a changed input.'
-      : a.days !== b.days
-        ? `Durations differ; days 1–${days} are compared.`
-        : 'Same seed and same astronaut ids: random variation is identical, so differences come from changed inputs.'
+    matching === 'position'
+      ? `The two missions have different crews, so astronauts are paired by roster position (first with first, and so on). Each difference mixes who is flying with what changed.${durations}`
+      : matching === 'name'
+        ? `Astronauts are paired by name.${cfgA.seed !== cfgB.seed ? ' The seeds differ, so part of every difference is random variation.' : ''}${durations}`
+        : cfgA.seed !== cfgB.seed
+          ? `The two scenarios use different random seeds, so part of every difference is random variation rather than a changed input.${durations}`
+          : a.days !== b.days
+            ? durations.trim()
+            : 'Same seed and same astronaut ids: random variation is identical, so differences come from changed inputs.'
   const astronauts: AstronautComparison[] = []
-  for (const ra of a.astronauts) {
-    const rb = b.astronauts.find((r) => r.astronautId === ra.astronautId)
-    if (!rb) continue
+  for (const [idA, idB] of pairs) {
+    const ra = a.astronauts.find((r) => r.astronautId === idA)
+    const rb = b.astronauts.find((r) => r.astronautId === idB)
+    if (!ra || !rb) continue
     const indicators: IndicatorDiff[] = SIM_INDICATORS.map((d) => {
       let sa = 0
       let sb = 0
@@ -141,8 +181,84 @@ export function compareRuns(cfgA: MissionConfig, a: SimulationResult, cfgB: Miss
       effects.push({ effectId, label: EFFECT_BY_ID[effectId]?.label ?? effectId, basis: EFFECT_BY_ID[effectId]?.basis ?? 'simplified', indicator, meanA, meanB })
     }
     effects.sort((x, y) => Math.abs(y.meanB - y.meanA) / SIM_INDICATOR_BY_ID[y.indicator].resolution - Math.abs(x.meanB - x.meanA) / SIM_INDICATOR_BY_ID[x.indicator].resolution)
-    const person = cfgB.crew.find((c) => c.id === ra.astronautId) ?? cfgA.crew.find((c) => c.id === ra.astronautId)
-    astronauts.push({ astronautId: ra.astronautId, name: person?.name ?? ra.astronautId, indicators, effects })
+    const nameA = cfgA.crew.find((c) => c.id === idA)?.name ?? idA
+    const nameB = cfgB.crew.find((c) => c.id === idB)?.name ?? idB
+    astronauts.push({ astronautId: idA, bId: idB, name: nameA, nameB, indicators, effects })
   }
-  return { comparable: astronauts.length > 0, reason: astronauts.length ? reason : 'The scenarios share no participating astronauts.', days, changes, astronauts }
+  return { comparable: astronauts.length > 0, reason: astronauts.length ? reason : 'One of the missions has no participating astronauts.', matching, days, changes, astronauts }
+}
+
+// ------------------------------------------------------------ mission outcomes
+
+export interface MissionOutcome {
+  label: string
+  unit: string
+  decimals: number
+  a: number
+  b: number
+  worseWhen: 'higher' | 'lower'
+  note: string
+}
+
+/** Crew-mean readiness for every day of a run. */
+export function crewReadiness(cfg: MissionConfig, r: SimulationResult): number[] {
+  const all = r.astronauts.map((x) => scoreSeries(cfg, r, x.astronautId))
+  return Array.from({ length: r.days }, (_, i) => all.reduce((s, ser) => s + ser[i], 0) / Math.max(1, all.length))
+}
+
+interface OutcomeStats {
+  readinessEnd: number
+  readinessMin: number
+  readinessMean: number
+  cautionDays: number
+  debt: number
+  pvt: number
+  fatigue: number
+  strength: number
+  bone: number
+  dose: number
+}
+
+function outcomeStats(cfg: MissionConfig, r: SimulationResult): OutcomeStats {
+  const series = r.astronauts.map((x) => scoreSeries(cfg, r, x.astronautId))
+  const end = r.days - 1
+  const n = Math.max(1, r.astronauts.length)
+  const avg = (f: (x: SimulationResult['astronauts'][number], k: number) => number) => r.astronauts.reduce((s, x, k) => s + f(x, k), 0) / n
+  const last7 = (arr: Float32Array) => {
+    let s = 0
+    const from = Math.max(0, end - 6)
+    for (let i = from; i <= end; i++) s += arr[i]
+    return s / (end - from + 1)
+  }
+  return {
+    readinessEnd: avg((_, k) => series[k][end]),
+    readinessMin: series.length ? Math.min(...series.map((s) => s[end])) : 0,
+    readinessMean: avg((_, k) => series[k].reduce((p, v) => p + v, 0) / series[k].length),
+    cautionDays: avg((_, k) => series[k].filter((v) => v < 65).length),
+    debt: avg((x) => x.daily.sleepDebt[end]),
+    pvt: avg((x) => last7(x.daily.pvtLapses)),
+    fatigue: avg((x) => x.daily.fatigue.reduce((p, v) => p + v, 0) / r.days),
+    strength: avg((x) => last7(x.daily.muscleStrength)),
+    bone: avg((x) => last7(x.daily.boneDensity)),
+    dose: avg((x) => x.daily.radiationDose.reduce((p, v) => p + v, 0)),
+  }
+}
+
+/** Whole-mission outcomes for each run, each taken at that mission's own end. */
+export function missionOutcomes(cfgA: MissionConfig, a: SimulationResult, cfgB: MissionConfig, b: SimulationResult): MissionOutcome[] {
+  const A = outcomeStats(cfgA, a)
+  const B = outcomeStats(cfgB, b)
+  const row = (label: string, key: keyof OutcomeStats, unit: string, decimals: number, worseWhen: 'higher' | 'lower', note: string): MissionOutcome => ({ label, unit, decimals, a: A[key], b: B[key], worseWhen, note })
+  return [
+    row('Readiness at mission end (crew mean)', 'readinessEnd', '/100', 0, 'lower', 'Same readiness model as the Medical Monitor.'),
+    row('Lowest individual readiness at end', 'readinessMin', '/100', 0, 'lower', 'The crew member most at risk.'),
+    row('Mean readiness over the mission', 'readinessMean', '/100', 0, 'lower', 'Every day, crew mean.'),
+    row('Days in caution (< 65) per astronaut', 'cautionDays', 'days', 0, 'higher', 'Days an astronaut would need attention.'),
+    row('Sleep debt at end', 'debt', 'h', 0, 'higher', '30 h ≈ one night without sleep (Van Dongen 2003).'),
+    row('Reaction-test lapses, last week', 'pvt', '/test', 1, 'higher', 'Well rested ≈ 2.'),
+    row('Mean fatigue over the mission', 'fatigue', '/10', 1, 'higher', ''),
+    row('Strength at end', 'strength', '% pre-flight', 1, 'lower', ''),
+    row('Bone indicator at end', 'bone', '% pre-flight', 2, 'lower', 'Bone lost in flight recovers slowly.'),
+    row('Radiation dose over the mission', 'dose', 'mSv', 0, 'higher', 'Career limit 600 mSv (NASA-STD-3001).'),
+  ]
 }

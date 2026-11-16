@@ -3,7 +3,8 @@ import { GitCompare } from 'lucide-react'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { EmptyState } from '../../components/ui/Misc'
-import { compareRuns } from '../../sim/compare'
+import { scoreSeries } from '../../sim/assess'
+import { compareRuns, crewReadiness, missionOutcomes, type MissionOutcome } from '../../sim/compare'
 import { missionLibrary, scenarioCopy, useMissionLibrary } from '../../sim/library'
 import { SIM_INDICATORS, SIM_INDICATOR_BY_ID } from '../../sim/reference'
 import { crewAlerts, runMission } from '../../sim/runtime'
@@ -12,21 +13,52 @@ import { Field, INPUT, Panel } from '../workbench/shared'
 import { SimChart } from './SimChart'
 import { eventBands, fmt } from './Results'
 
-/** Run two scenarios with the same seed and crew and explain the differences. */
+type Measure = SimIndicator | 'readiness'
+
+function OutcomeRow({ o }: { o: MissionOutcome }) {
+  const diff = o.b - o.a
+  const tol = 0.5 * 10 ** -o.decimals
+  const worse = Math.abs(diff) < tol ? null : (o.worseWhen === 'higher') === diff > 0
+  return (
+    <tr className="border-b border-border/60 align-top">
+      <td className="py-1.5 pr-3 text-text">
+        {o.label}
+        {o.note && <p className="text-[10px] leading-snug text-faint">{o.note}</p>}
+      </td>
+      <td className="mono py-1.5 pr-3 text-muted">
+        {o.a.toFixed(o.decimals)} <span className="text-faint">{o.unit}</span>
+      </td>
+      <td className="mono py-1.5 pr-3 text-text-strong">
+        {o.b.toFixed(o.decimals)} <span className="text-faint">{o.unit}</span>
+      </td>
+      <td className={`mono py-1.5 ${worse === null ? 'text-faint' : worse ? 'text-danger' : 'text-ok'}`}>
+        {worse === null ? 'same' : `${diff > 0 ? '+' : ''}${diff.toFixed(o.decimals)} ${worse ? '(worse)' : '(better)'}`}
+      </td>
+    </tr>
+  )
+}
+
+/** Run two missions and explain how their outcomes and the paths to them differ. */
 export function CompareView({ activeId, onEditB }: { activeId: string; onEditB: (id: string) => void }) {
   const lib = useMissionLibrary()
-  // Opened from a scenario copy: compare its parent (A) with it (B). Otherwise A is the open mission.
+  // Opened from a scenario copy: compare its parent (A) with it (B). Otherwise A is the
+  // open mission and B its scenario copy, or else the next mission in the library.
   const open = lib.missions.find((m) => m.id === activeId)
   const parent = open?.scenarioOf && lib.missions.some((m) => m.id === open.scenarioOf) ? open.scenarioOf : null
   const [aId, setA] = useState(parent ?? activeId)
-  const [bId, setB] = useState(parent ? activeId : (lib.missions.find((m) => m.scenarioOf === activeId)?.id ?? ''))
+  const [bId, setB] = useState(
+    parent ? activeId : (lib.missions.find((m) => m.scenarioOf === activeId)?.id ?? lib.missions.find((m) => m.id !== activeId)?.id ?? ''),
+  )
   const [who, setWho] = useState('')
-  const [indicator, setIndicator] = useState<SimIndicator>('restingHR')
+  const [measure, setMeasure] = useState<Measure>('readiness')
   const A = lib.missions.find((m) => m.id === aId)
   const B = lib.missions.find((m) => m.id === bId)
   const runA = useMemo(() => (A ? runMission(A) : null), [A])
   const runB = useMemo(() => (B ? runMission(B) : null), [B])
   const cmp = useMemo(() => (A && B && runA?.result && runB?.result ? compareRuns(A, runA.result, B, runB.result) : null), [A, B, runA, runB])
+  const outcomes = useMemo(() => (A && B && runA?.result && runB?.result ? missionOutcomes(A, runA.result, B, runB.result) : []), [A, B, runA, runB])
+  const crewA = useMemo(() => (A && runA?.result ? crewReadiness(A, runA.result) : []), [A, runA])
+  const crewB = useMemo(() => (B && runB?.result ? crewReadiness(B, runB.result) : []), [B, runB])
 
   const makeB = () => {
     const src = lib.missions.find((m) => m.id === aId)
@@ -52,19 +84,26 @@ export function CompareView({ activeId, onEditB }: { activeId: string; onEditB: 
 
   const astro = cmp?.astronauts.find((x) => x.astronautId === who) ?? cmp?.astronauts[0]
   const ra = runA?.result?.astronauts.find((x) => x.astronautId === astro?.astronautId)
-  const rb = runB?.result?.astronauts.find((x) => x.astronautId === astro?.astronautId)
+  const rb = runB?.result?.astronauts.find((x) => x.astronautId === astro?.bId)
+  const pairLabel = (x: { name: string; nameB: string }) => (x.name === x.nameB ? x.name : `${x.name} ↔ ${x.nameB}`)
   const firstAlert = (cfg: typeof A, r: typeof runA, id: string) => {
     if (!cfg || !r?.result) return null
     const days = crewAlerts(cfg, r.result).filter((x) => x.astronautId === id && x.level !== 'monitoring-alert').map((x) => x.startDay)
     return days.length ? Math.min(...days) : null
   }
+  const measureValues = (cfg: typeof A, r: typeof runA, id: string | undefined): ArrayLike<number> => {
+    if (!cfg || !r?.result || !id) return []
+    if (measure === 'readiness') return scoreSeries(cfg, r.result, id)
+    return r.result.astronauts.find((x) => x.astronautId === id)?.daily[measure] ?? []
+  }
+  const measureDecimals = measure === 'readiness' ? 0 : SIM_INDICATOR_BY_ID[measure].decimals
 
   return (
     <div className="space-y-4">
-      <Panel title="Scenarios" note="SAME SEED + SAME CREW = FAIR COMPARISON">
+      <Panel title="Missions" note="SAME SEED + SAME CREW = FAIR COMPARISON">
         <div className="flex flex-wrap items-end gap-3">
-          {select('Scenario A', aId, setA)}
-          {select('Scenario B', bId, setB)}
+          {select('Mission A', aId, setA)}
+          {select('Mission B', bId, setB)}
           <Button icon={<GitCompare className="h-3.5 w-3.5" />} onClick={makeB}>
             Make B from A
           </Button>
@@ -74,22 +113,68 @@ export function CompareView({ activeId, onEditB }: { activeId: string; onEditB: 
             </Button>
           )}
         </div>
-        <p className="mt-2 text-[10.5px] text-muted">“Make B from A” copies scenario A with the same seed, astronauts and events, and opens it for editing. Change what you want to test, then come back here.</p>
+        <p className="mt-2 text-[10.5px] text-muted">
+          Compare any two missions. For a controlled test, “Make B from A” copies A with the same seed, astronauts and events and opens it for editing: change one thing, then come back here.
+        </p>
       </Panel>
 
-      {(runA?.error || runB?.error) && <p className="border border-danger/40 px-3 py-2 text-xs text-danger">{runA?.error || runB?.error}</p>}
+      {(runA?.error || runB?.error) && (
+        <p className="border border-danger/40 px-3 py-2 text-xs text-danger">
+          {runA?.error ? `Mission A cannot run: ${runA.error}` : `Mission B cannot run: ${runB?.error}`}
+        </p>
+      )}
 
       {!cmp ? (
-        <EmptyState icon={GitCompare} title="Choose two scenarios" body="Pick scenario A and B above, or make B from A." />
+        <EmptyState icon={GitCompare} title="Choose two missions" body="Pick mission A and B above, or make B from A." />
       ) : (
         <>
-          <p className="border border-border px-3 py-2 text-xs text-text">{cmp.reason}</p>
+          <p className="border border-border px-3 py-2 text-xs text-text">
+            {aId === bId ? 'A and B are the same mission, so every difference is zero. Pick a different mission for B, or make B from A. ' : ''}
+            {cmp.reason}
+          </p>
+
+          <div className="grid gap-4 xl:grid-cols-12">
+            <Panel title="Mission outcomes" note="B − A · RED = WORSE IN B" className="xl:col-span-7">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-left text-[9px] uppercase tracking-[0.14em] text-faint">
+                    <tr className="border-b border-border">
+                      <th className="py-1.5 font-semibold">Outcome (crew mean)</th>
+                      <th className="py-1.5 font-semibold">A</th>
+                      <th className="py-1.5 font-semibold">B</th>
+                      <th className="py-1.5 font-semibold">B − A</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {outcomes.map((o) => (
+                      <OutcomeRow key={o.label} o={o} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-[10.5px] text-muted">
+                A: {A?.name} · {runA?.result?.days} days · {runA?.result?.astronauts.length} crew. B: {B?.name} · {runB?.result?.days} days · {runB?.result?.astronauts.length} crew.
+              </p>
+            </Panel>
+            <Panel title="Crew readiness, A vs B" note="CREW MEAN · SAME MODEL AS MEDICAL MONITOR" className="xl:col-span-5">
+              <SimChart
+                series={[
+                  { key: 'a', label: `A: ${A?.name ?? ''}`, color: 'var(--muted)', values: crewA, dashed: true },
+                  { key: 'b', label: `B: ${B?.name ?? ''}`, color: 'var(--accent)', values: crewB },
+                ]}
+                reference={{ value: 65, label: 'caution below 65' }}
+                decimals={0}
+                height={230}
+              />
+            </Panel>
+          </div>
+
           <div className="grid gap-4 xl:grid-cols-12">
             <Panel title="What changed in the inputs" note={`${cmp.changes.length} CHANGE${cmp.changes.length === 1 ? '' : 'S'}`} className="xl:col-span-5">
               {cmp.changes.length === 0 ? (
-                <p className="text-xs text-muted">The scenarios have identical inputs, so their outputs are identical.</p>
+                <p className="text-xs text-muted">The missions have identical inputs, so their outputs are identical.</p>
               ) : (
-                <ul className="divide-y divide-border text-xs">
+                <ul className="max-h-80 divide-y divide-border overflow-y-auto text-xs">
                   {cmp.changes.map((c, i) => (
                     <li key={i} className="py-1.5">
                       <Badge>{c.area}</Badge> <span className="text-text-strong">{c.label}</span>
@@ -105,11 +190,11 @@ export function CompareView({ activeId, onEditB }: { activeId: string; onEditB: 
               <div className="mb-2 flex flex-wrap gap-1">
                 {cmp.astronauts.map((x) => (
                   <button key={x.astronautId} onClick={() => setWho(x.astronautId)} className={`border px-2 py-0.5 text-[11px] ${astro?.astronautId === x.astronautId ? 'border-text-strong text-text-strong' : 'border-border text-muted'}`}>
-                    {x.name}
+                    {pairLabel(x)}
                   </button>
                 ))}
               </div>
-              {astro && astro.effects.length === 0 && <p className="text-xs text-muted">No modeled effect differs for {astro.name}.</p>}
+              {astro && astro.effects.length === 0 && <p className="text-xs text-muted">No modeled effect differs for {pairLabel(astro)}.</p>}
               {astro && (
                 <ul className="space-y-1.5 text-xs">
                   {astro.effects.slice(0, 10).map((e) => {
@@ -127,23 +212,25 @@ export function CompareView({ activeId, onEditB }: { activeId: string; onEditB: 
               )}
             </Panel>
           </div>
+
           {astro && ra && rb && A && B && (
             <>
-              <Panel title={`${astro.name}: A vs B`}>
+              <Panel title={`${pairLabel(astro)}: A vs B`} note={cmp.matching === 'position' ? 'PAIRED BY ROSTER POSITION' : cmp.matching === 'name' ? 'PAIRED BY NAME' : 'SAME ASTRONAUT'}>
                 <div className="mb-2 flex flex-wrap gap-1">
-                  {SIM_INDICATORS.map((s) => (
-                    <button key={s.id} onClick={() => setIndicator(s.id)} className={`border px-2 py-0.5 text-[10.5px] ${indicator === s.id ? 'border-text-strong text-text-strong' : 'border-border text-muted'}`}>
-                      {s.shortLabel}
+                  {(['readiness', ...SIM_INDICATORS.map((s) => s.id)] as Measure[]).map((id) => (
+                    <button key={id} onClick={() => setMeasure(id)} className={`border px-2 py-0.5 text-[10.5px] ${measure === id ? 'border-text-strong text-text-strong' : 'border-border text-muted'}`}>
+                      {id === 'readiness' ? 'Readiness' : SIM_INDICATOR_BY_ID[id].shortLabel}
                     </button>
                   ))}
                 </div>
                 <SimChart
                   series={[
-                    { key: 'a', label: `A: ${A.name}`, color: 'var(--muted)', values: ra.daily[indicator].subarray(0, cmp.days), dashed: true },
-                    { key: 'b', label: `B: ${B.name}`, color: 'var(--accent)', values: rb.daily[indicator].subarray(0, cmp.days) },
+                    { key: 'a', label: `A: ${astro.name} · ${A.name}`, color: 'var(--muted)', values: measureValues(A, runA, astro.astronautId), dashed: true },
+                    { key: 'b', label: `B: ${astro.nameB} · ${B.name}`, color: 'var(--accent)', values: measureValues(B, runB, astro.bId) },
                   ]}
-                  bands={eventBands(B, astro.astronautId)}
-                  decimals={SIM_INDICATOR_BY_ID[indicator].decimals}
+                  bands={eventBands(B, astro.bId)}
+                  reference={measure === 'readiness' ? { value: 65, label: 'caution below 65' } : undefined}
+                  decimals={measureDecimals}
                   height={210}
                 />
               </Panel>
@@ -176,7 +263,7 @@ export function CompareView({ activeId, onEditB }: { activeId: string; onEditB: 
                   </table>
                 </div>
                 <p className="mt-2 text-xs text-muted">
-                  First trend or pattern alert for {astro.name}: A {firstAlert(A, runA, astro.astronautId) ?? 'none'}, B {firstAlert(B, runB, astro.astronautId) ?? 'none'}. A simulated difference is not evidence that a real change would have the same effect.
+                  First trend or pattern alert: A ({astro.name}) {firstAlert(A, runA, astro.astronautId) ?? 'none'}, B ({astro.nameB}) {firstAlert(B, runB, astro.bId) ?? 'none'}. A simulated difference is not evidence that a real change would have the same effect.
                 </p>
               </Panel>
             </>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { alertsFor, analyzeAstronaut, datasetForAstronaut, summarise } from '../analyze'
-import { compareRuns, inputChanges } from '../compare'
+import { compareRuns, crewReadiness, inputChanges, missionOutcomes } from '../compare'
 import { LIMITS, REFERENCE_SPO2, dayInputs, modelSpO2, simulate, validateConfig } from '../engine'
 import { blankMission, duplicateAstronaut, duplicateMission, exampleMissions, newAstronaut, newEvent, scenarioCopy } from '../library'
 import { EFFECT_BY_ID, NOMINAL_ENVIRONMENT, SIM_INDICATORS } from '../reference'
@@ -316,6 +316,26 @@ describe('scenario comparison', () => {
     const other = { ...scenarioCopy(a), seed: 1 }
     expect(compareRuns(a, simulate(a), other, simulate(other)).reason).toMatch(/different random seeds/)
     expect(inputChanges(a, other).some((x) => x.label === 'Random seed')).toBe(true)
+  })
+
+  it('compares two unrelated missions by pairing crews and mission outcomes', () => {
+    const other = exampleMissions()[1]
+    const ra = simulate(a)
+    const rb = simulate(other)
+    const c = compareRuns(a, ra, other, rb)
+    expect(c.comparable).toBe(true)
+    expect(c.matching).not.toBe('id')
+    expect(c.astronauts.length).toBe(Math.min(ra.astronauts.length, rb.astronauts.length))
+    for (const x of c.astronauts) {
+      expect(ra.astronauts.some((r) => r.astronautId === x.astronautId)).toBe(true)
+      expect(rb.astronauts.some((r) => r.astronautId === x.bId)).toBe(true)
+    }
+    const out = missionOutcomes(a, ra, other, rb)
+    for (const o of out) {
+      expect(Number.isFinite(o.a)).toBe(true)
+      expect(Number.isFinite(o.b)).toBe(true)
+    }
+    expect(crewReadiness(other, rb).length).toBe(rb.days)
   })
 
   it('a duplicated mission gets fresh ids but the same inputs', () => {

@@ -50,7 +50,8 @@ export function SimChart({
   const m = { l: 44, r: 10, t: 10, b: 22 }
   const iw = Math.max(40, width - m.l - m.r)
   const ih = height - m.t - m.b
-  const n = series.length ? series[0].values.length : 0
+  // Longest series sets the x axis, so shorter series (a shorter mission) end early instead of stretching.
+  const n = series.reduce((acc, s) => Math.max(acc, s.values.length), 0)
   const xMax = xStart + (n - 1) * xStep
 
   const model = useMemo(() => {
@@ -75,26 +76,42 @@ export function SimChart({
     lo -= pad
     hi += pad
     const cols = Math.max(2, Math.floor(iw))
+    const xOf = (i: number) => (m.l + (i / Math.max(1, n - 1)) * iw).toFixed(1)
     const paths = series.map((s) => {
       const len = s.values.length
       let d = ''
+      let pen = false
       const yOf = (v: number) => m.t + (1 - (v - lo) / (hi - lo)) * ih
-      if (len <= cols * 2) {
-        for (let i = 0; i < len; i++) d += `${i ? 'L' : 'M'}${(m.l + (i / Math.max(1, len - 1)) * iw).toFixed(1)},${yOf(s.values[i]).toFixed(1)}`
+      if (n <= cols * 2) {
+        for (let i = 0; i < len; i++) {
+          const v = s.values[i]
+          if (!Number.isFinite(v)) {
+            pen = false
+            continue
+          }
+          d += `${pen ? 'L' : 'M'}${xOf(i)},${yOf(v).toFixed(1)}`
+          pen = true
+        }
       } else {
         // Min/max decimation per pixel column keeps peaks visible.
         for (let c = 0; c < cols; c++) {
-          const a = Math.floor((c / cols) * len)
-          const b = Math.max(a + 1, Math.floor(((c + 1) / cols) * len))
+          const a = Math.floor((c / cols) * n)
+          const b = Math.min(len, Math.max(a + 1, Math.floor(((c + 1) / cols) * n)))
           let mn = Infinity
           let mx = -Infinity
           for (let i = a; i < b; i++) {
             const v = s.values[i]
+            if (!Number.isFinite(v)) continue
             if (v < mn) mn = v
             if (v > mx) mx = v
           }
+          if (!Number.isFinite(mn)) {
+            pen = false
+            continue
+          }
           const x = (m.l + (c / (cols - 1)) * iw).toFixed(1)
-          d += `${c ? 'L' : 'M'}${x},${yOf(mn).toFixed(1)}L${x},${yOf(mx).toFixed(1)}`
+          d += `${pen ? 'L' : 'M'}${x},${yOf(mn).toFixed(1)}L${x},${yOf(mx).toFixed(1)}`
+          pen = true
         }
       }
       return d

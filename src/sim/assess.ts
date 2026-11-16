@@ -606,10 +606,17 @@ export function assess(config: MissionConfig, result: SimulationResult, astronau
   return out
 }
 
-/** Readiness score for every day of the mission (for the trend chart). */
+const seriesCache = new Map<string, number[]>()
+
+/** Readiness score for every day of the mission (for trend charts). */
 export function scoreSeries(config: MissionConfig, result: SimulationResult, astronautId: string): number[] {
+  const key = `${result.fingerprint}|${astronautId}`
+  const hit = seriesCache.get(key)
+  if (hit) return hit
   const out: number[] = []
   for (let d = 1; d <= result.days; d++) out.push(assessCore(config, result, astronautId, d)?.score ?? 0)
+  if (seriesCache.size > 64) seriesCache.clear()
+  seriesCache.set(key, out)
   return out
 }
 
