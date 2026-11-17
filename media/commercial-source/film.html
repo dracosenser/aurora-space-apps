@@ -1,0 +1,615 @@
+<!doctype html>
+<!--
+  AURORA — 30-second cinematic commercial, frame renderer.
+
+  Deterministic: window.renderFrame(n) paints frame n of 900 and nothing in
+  here reads a clock, so the same n always produces the same pixels and the
+  render is restartable.
+
+  Three layers compose each frame:
+    PLATE   a pre-rendered spacecraft frame from AURORA's own WebGL renderer
+    SCREEN  AURORA's interface, rebuilt from the app's own design tokens and
+            driven by the application's real data for mission day 407
+    TEXT    the commercial's titles
+
+  Everything the interface states - crew names, scores, statuses, the drivers
+  behind them, the indicator series, the radiation event - comes from
+  data.json, which data.mjs produced by calling AURORA's own
+  generateMissionRecords / detectAnomalies / computeStatus. Nothing on screen
+  is invented for the film, and nothing changes its verdict mid-shot for
+  dramatic effect: on day 407 Ferreira is in caution and the other three are
+  nominal, so that is what every frame shows. Only the drawing-in of the
+  interface is animated.
+
+  Grade, bloom, chromatic aberration, lens flare, depth of field, motion blur,
+  grain and the glitch are applied afterwards by post.py, on pixels.
+-->
+<html><head><meta charset="utf-8">
+<style>
+:root{
+  --bg-deep:#0a0a0a; --bg:#101010; --surface:#191919; --surface-2:#1e1e1e; --surface-3:#292929;
+  --border:rgba(229,226,218,0.1); --border-strong:rgba(229,226,218,0.21);
+  --text-strong:#e5e2da; --text:#c3c0b8; --muted:#a5a5a0; --faint:#6f6f6a;
+  --navy:#172638; --accent:#53708c; --accent-2:#6b89a6; --info-cyan:#6f93a3;
+  --screen-glow:#7fae9a; --alert-amber:#c89248; --danger-red:#c2564e; --slate:#35444a;
+  --font-sans:'Inter',system-ui,sans-serif;
+  --font-mono:'DejaVu Sans Mono',ui-monospace,monospace;
+  --font-display:'DejaVu Serif',Georgia,serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#000}
+body{font-family:var(--font-sans);color:var(--text);-webkit-font-smoothing:antialiased}
+#stage{position:relative;width:1920px;height:1080px;background:#000;overflow:hidden}
+
+/* ---------------------------------------------------------- plate layer */
+.plate{position:absolute;inset:0;width:1920px;height:1080px;object-fit:cover;
+       will-change:opacity,transform,filter}
+
+/* --------------------------------------------------------- screen layer */
+#screen{position:absolute;inset:0;background:var(--bg-deep);opacity:0;
+        will-change:opacity,transform,filter;transform-origin:50% 50%}
+/* Content is centred vertically: the screens vary in height and a top-aligned
+   layout leaves half the frame empty on the shorter ones. */
+#screenInner{position:absolute;inset:0;padding:54px 72px;display:flex;
+             flex-direction:column;justify-content:center}
+
+/* glass: a slow diagonal sheen so the interface reads as a lit panel */
+#sheen{position:absolute;inset:-30%;pointer-events:none;opacity:.5;
+  background:linear-gradient(104deg,transparent 30%,rgba(190,214,232,.055) 46%,
+             rgba(190,214,232,.085) 50%,rgba(190,214,232,.04) 55%,transparent 70%)}
+/* the analysis sweep that runs down the reveal */
+#sweep{position:absolute;left:0;right:0;height:230px;pointer-events:none;opacity:0;
+  background:linear-gradient(to bottom,transparent,rgba(127,174,154,.07) 62%,
+             rgba(127,174,154,.22) 88%,rgba(190,214,232,.5) 99%,transparent)}
+
+.hdr{display:flex;align-items:baseline;gap:22px;border-bottom:1px solid var(--border);
+     padding-bottom:17px;margin-bottom:26px}
+.wordmark{font-family:var(--font-display);font-size:31px;letter-spacing:.3em;
+          color:var(--text-strong);font-weight:400}
+.hdr .sub{font-family:var(--font-mono);font-size:14.5px;letter-spacing:.11em;color:var(--faint);
+          text-transform:uppercase}
+.hdr .right{margin-left:auto;font-family:var(--font-mono);font-size:14.5px;
+            letter-spacing:.1em;color:var(--muted)}
+.eyebrow{font-family:var(--font-mono);font-size:13px;letter-spacing:.21em;
+         text-transform:uppercase;color:var(--faint);margin-bottom:15px}
+
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:24px 26px}
+.card.warn{border-color:rgba(200,146,72,.45);background:linear-gradient(180deg,#1f1a12,#191919)}
+
+.cname{font-size:25px;color:var(--text-strong);font-weight:500;letter-spacing:-.01em}
+.crole{font-family:var(--font-mono);font-size:12.5px;color:var(--faint);letter-spacing:.07em;
+       margin-top:5px;text-transform:uppercase}
+.scoreRow{display:flex;align-items:flex-end;gap:11px;margin-top:20px}
+.score{font-family:var(--font-mono);font-size:55px;line-height:.92;color:var(--text-strong)}
+.score.amber{color:var(--alert-amber)}
+.of{font-family:var(--font-mono);font-size:15px;color:var(--faint);padding-bottom:7px}
+.pill{display:inline-block;font-family:var(--font-mono);font-size:11.5px;letter-spacing:.17em;
+      text-transform:uppercase;padding:5px 11px;border-radius:5px;margin-top:15px;
+      border:1px solid var(--border-strong);color:var(--muted)}
+.pill.ok{color:var(--screen-glow);border-color:rgba(127,174,154,.42)}
+.pill.amber{color:var(--alert-amber);border-color:rgba(200,146,72,.5)}
+.bar{height:3px;background:var(--surface-3);border-radius:2px;margin-top:17px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--screen-glow);border-radius:2px}
+.bar i.amber{background:var(--alert-amber)}
+.driver{font-size:14.5px;color:var(--muted);margin-top:14px;line-height:1.45}
+.driver.amber{color:var(--alert-amber)}
+
+.kpi{font-family:var(--font-mono);font-size:44px;color:var(--text-strong);line-height:1}
+.kunit{font-family:var(--font-mono);font-size:16px;color:var(--faint);margin-left:6px}
+.klabel{font-family:var(--font-mono);font-size:12.5px;letter-spacing:.15em;text-transform:uppercase;
+        color:var(--faint);margin-bottom:13px}
+.kdelta{font-family:var(--font-mono);font-size:15px;margin-top:11px;color:var(--muted)}
+.kdelta.amber{color:var(--alert-amber)}
+
+.anom{border:1px solid rgba(200,146,72,.45);border-radius:11px;padding:28px 32px;
+      background:linear-gradient(180deg,#1f1a12,#181818)}
+.atitle{font-size:27px;color:var(--text-strong);font-weight:500}
+.abody{font-size:16.5px;color:var(--muted);line-height:1.6;margin-top:14px;max-width:1180px}
+.atags{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.tag{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;
+     padding:5px 11px;border:1px solid var(--border-strong);border-radius:5px;color:var(--muted)}
+
+.tl{position:relative;height:5px;background:var(--surface-3);border-radius:3px;margin:40px 0 0}
+.tl i{position:absolute;top:0;left:0;height:100%;background:var(--accent-2);border-radius:3px}
+.tlmark{position:absolute;top:-7px;width:2px;height:19px;background:var(--border-strong)}
+.tlnow{position:absolute;top:-13px;width:3px;height:31px;background:var(--text-strong)}
+.tllab{display:flex;justify-content:space-between;margin-top:17px;
+       font-family:var(--font-mono);font-size:13px;color:var(--faint);letter-spacing:.07em}
+
+/* ----------------------------------------------------------- text layer */
+#text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      pointer-events:none}
+#textInner{text-align:center;will-change:opacity,transform,filter}
+.t-hook{font-family:var(--font-display);font-size:62px;letter-spacing:.17em;color:#e9e6de;
+        font-weight:400;text-shadow:0 2px 44px rgba(0,0,0,.95)}
+.t-prob{font-family:var(--font-sans);font-size:46px;letter-spacing:.055em;color:#e9e6de;
+        font-weight:300;text-shadow:0 2px 40px rgba(0,0,0,.92);line-height:1.3}
+.t-intro{font-family:var(--font-display);font-size:70px;letter-spacing:.2em;color:#f0ede6;
+         font-weight:400;text-shadow:0 2px 50px rgba(0,0,0,.9)}
+.t-feat{font-family:var(--font-sans);font-size:58px;letter-spacing:.17em;color:#f0ede6;
+        font-weight:300;text-shadow:0 2px 40px rgba(0,0,0,.9)}
+.t-pay{font-family:var(--font-display);font-size:41px;letter-spacing:.035em;color:#e9e6de;
+       font-weight:400;line-height:1.55;max-width:1280px;text-shadow:0 2px 40px rgba(0,0,0,.92)}
+
+/* feature headlines sit low so the interface stays readable above them */
+#text.low{align-items:flex-end;padding-bottom:104px}
+
+/* ---------------------------------------------------------- brand layer */
+#brand{position:absolute;inset:0;background:#070707;display:flex;flex-direction:column;
+       align-items:center;justify-content:center;opacity:0;will-change:opacity}
+#brandGlow{position:absolute;left:50%;top:50%;width:1500px;height:1500px;transform:translate(-50%,-50%);
+  background:radial-gradient(circle,rgba(83,112,140,.20),rgba(83,112,140,.05) 38%,transparent 66%)}
+#bWord{position:relative;font-family:var(--font-display);font-size:138px;letter-spacing:.34em;
+       color:#f2efe8;font-weight:400;text-indent:.34em}
+#bRule{position:relative;height:1px;background:var(--border-strong);margin:40px 0 34px}
+#bTag{position:relative;font-family:var(--font-mono);font-size:21px;letter-spacing:.3em;
+      color:var(--muted);text-transform:uppercase;text-align:center;line-height:2}
+#bChal{position:relative;font-family:var(--font-mono);font-size:14.5px;letter-spacing:.27em;
+       color:var(--faint);text-transform:uppercase;margin-top:54px}
+
+/* A scrim under the titles. Type over a lit interface or a bright Earth limb
+   is unreadable without one, and a flat black box would look like a caption
+   bar, so this is a soft gradient that follows the title's own opacity. */
+#scrim{position:absolute;inset:0;pointer-events:none;opacity:0}
+
+/* ------------------------------------------------------------ overlays */
+#vig{position:absolute;inset:0;pointer-events:none}
+#fade{position:absolute;inset:0;background:#000;pointer-events:none;opacity:0}
+</style></head>
+<body>
+<div id="stage">
+  <img id="pA" class="plate"><img id="pB" class="plate">
+  <div id="screen"><div id="sheen"></div><div id="screenInner"></div><div id="sweep"></div></div>
+  <div id="scrim"></div>
+  <div id="text"><div id="textInner"></div></div>
+  <div id="brand">
+    <div id="brandGlow"></div>
+    <div id="bWord">AURORA</div>
+    <div id="bRule"></div>
+    <div id="bTag">See the signals.<br>Protect the crew. Support the mission.</div>
+    <div id="bChal">NASA Space Apps Challenge 2026</div>
+  </div>
+  <div id="vig"></div>
+  <div id="fade"></div>
+</div>
+
+<script>
+const FPS = 30, TOTAL = 900;
+const $ = id => document.getElementById(id);
+const pA = $('pA'), pB = $('pB'), screenEl = $('screen'), inner = $('screenInner'),
+      sweep = $('sweep'), sheen = $('sheen'), textEl = $('text'), textIn = $('textInner'),
+      brand = $('brand'), vig = $('vig'), fade = $('fade'), scrim = $('scrim');
+
+let D = null;
+fetch('data.json').then(r => r.json()).then(d => { D = d; window.DATA_READY = true; });
+
+// ------------------------------------------------------------- easings
+const cl  = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const ease     = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const easeOut  = x => 1 - Math.pow(1 - x, 3);
+const easeIn   = x => x * x * x;
+const smooth   = x => x * x * (3 - 2 * x);
+
+// A rise, a hold and a fall. Everything timed in the film goes through this.
+function band(t, a, b, fin = .45, fout = .45) {
+  if (t <= a || t >= b) return 0;
+  if (t < a + fin)  return easeOut((t - a) / fin);
+  if (t > b - fout) return easeOut((b - t) / fout);
+  return 1;
+}
+const fmt = (v, d = 0) => Number(v).toFixed(d);
+
+// ================================================================ PLATES
+// Each entry: frames [a,b) of the film drawn from plate index p + (n - a).
+// x is the cross-dissolve length in frames; 0 is a hard cut.
+const SEGS = [
+  { a:   0, b:  50, p:   0, x: 0  },   // exterior, creeping in
+  { a:  50, b: 100, p:  50, x: 10 },   // exterior, tracking past
+  { a: 100, b: 150, p: 100, x: 0  },   // cut inside: medical bay macro
+  { a: 150, b: 190, p: 150, x: 0  },   // tracking down the spine
+  { a: 190, b: 230, p: 190, x: 0  },   // console macro
+  { a: 270, b: 300, p: 300, x: 0, hold: 7 },   // the push into the screen
+  { a: 510, b: 540, p: 510, x: 0  },   // suits on the rack
+  { a: 630, b: 660, p: 630, x: 0  },   // the cupola
+  { a: 720, b: 750, p: 690, x: 8  },   // payoff: the window
+  { a: 750, b: 810, p: 750, x: 12 },   // payoff: pulling away
+];
+const src = i => 'plates/' + String(i).padStart(4, '0') + '.jpg';
+
+function paintPlates(n) {
+  let k = -1, held = 0;
+  for (let i = 0; i < SEGS.length; i++) if (n >= SEGS[i].a && n < SEGS[i].b) k = i;
+  if (k < 0) {
+    // A shot may hold on its last frame past its own end, so the thing that
+    // follows can dissolve through it rather than cutting out to black.
+    for (let i = 0; i < SEGS.length; i++) {
+      const h = SEGS[i].hold || 0;
+      if (h && n >= SEGS[i].b && n < SEGS[i].b + h) { k = i; held = n - SEGS[i].b + 1; }
+    }
+  }
+  if (k < 0) { pA.style.opacity = 0; pB.style.opacity = 0; return; }
+  const s = SEGS[k];
+  if (held) {
+    pA.src = src(s.p + (s.b - s.a) - 1);
+    pA.style.opacity = (1 - held / (s.hold + 1)).toFixed(3);
+    pB.style.opacity = 0;
+    return;
+  }
+  const cur = s.p + (n - s.a);
+  // The outgoing shot holds on its last frame underneath while the incoming
+  // one dissolves up over it.
+  const prev = (k > 0 && SEGS[k - 1].b === s.a) ? SEGS[k - 1] : null;
+  const mixing = prev && s.x > 0 && (n - s.a) < s.x;
+  if (mixing) {
+    pA.src = src(prev.p + (prev.b - prev.a) - 1);
+    pA.style.opacity = 1;
+    pB.src = src(cur);
+    pB.style.opacity = smooth((n - s.a + 1) / s.x);
+  } else {
+    pA.src = src(cur);
+    pA.style.opacity = 1;
+    pB.style.opacity = 0;
+  }
+}
+
+// ================================================================ SCREENS
+// AURORA's interface, rebuilt from the application's own design tokens and
+// filled from the application's own data for mission day 407.
+
+function sparkline(pts, w, h, colour, prog = 1, fill = false) {
+  if (!pts.length) return '';
+  const vs = pts.map(p => p.v), lo = Math.min(...vs), hi = Math.max(...vs), r = (hi - lo) || 1;
+  const cut = Math.max(2, Math.round(pts.length * prog));
+  const xy = pts.slice(0, cut).map((p, i) => {
+    const x = (i / (pts.length - 1)) * w;
+    const y = h - ((p.v - lo) / r) * (h - 10) - 5;
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  });
+  const area = fill
+    ? `<polygon points="0,${h} ${xy.join(' ')} ${(xy.length ? xy[xy.length - 1].split(',')[0] : 0)},${h}"
+         fill="${colour}" opacity=".10"/>` : '';
+  const head = xy.length ? `<circle cx="${xy[xy.length-1].split(',')[0]}" cy="${xy[xy.length-1].split(',')[1]}"
+       r="4" fill="${colour}" opacity="${(.35 + .65 * prog).toFixed(2)}"/>` : '';
+  return `<svg width="${w}" height="${h}" style="display:block">
+    <line x1="0" y1="${h-5}" x2="${w}" y2="${h-5}" stroke="rgba(229,226,218,.09)" stroke-width="1"/>
+    ${area}<polyline points="${xy.join(' ')}" fill="none" stroke="${colour}"
+      stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>${head}</svg>`;
+}
+
+function header(sub, right) {
+  return `<div class="hdr"><span class="wordmark">AURORA</span>
+    <span class="sub">${sub}</span><span class="right">${right}</span></div>`;
+}
+const DAYLINE = () => `Day ${D.mission.day} / ${D.mission.totalDays} &nbsp;·&nbsp; ${D.phase}`;
+
+// --- crew roster -------------------------------------------------------
+function screenCrew(prog, compact) {
+  const cards = D.crew.map((c, i) => {
+    const k = cl((prog - i * 0.08) / 0.5);          // the tiles arrive in sequence
+    const warn = c.status !== 'nominal';
+    return `<div class="card ${warn ? 'warn' : ''}"
+      style="opacity:${easeOut(k).toFixed(3)};transform:translateY(${((1-easeOut(k))*16).toFixed(1)}px)">
+      <div class="cname">${c.name}</div>
+      <div class="crole">${c.role}</div>
+      <!-- The number fades in at its true value. It never counts up: a tile
+           reading 36 when AURORA's actual score is 61 would be a false
+           statement on screen, however briefly it is held. -->
+      <div class="scoreRow"><span class="score ${warn ? 'amber' : ''}">${c.score}</span>
+        <span class="of">/ 100</span></div>
+      <div class="bar"><i class="${warn ? 'amber' : ''}" style="width:${(c.score * k).toFixed(0)}%"></i></div>
+      <span class="pill ${warn ? 'amber' : 'ok'}">${c.status}</span>
+      ${compact ? '' : `<div class="driver ${warn ? 'amber' : ''}">${c.drivers[0]}</div>`}
+    </div>`;
+  }).join('');
+  return header('Crew health overview', DAYLINE()) +
+    `<div class="eyebrow">Daily composite health score</div><div class="grid4">${cards}</div>`;
+}
+
+// --- the reveal: the whole picture at once ----------------------------
+// The densest frame in the film, because this is the shot that has to say
+// what AURORA is: the crew, their trends, and the pattern Signal Veil found.
+function screenReveal(prog) {
+  const cards = D.crew.map((c, i) => {
+    const k = cl((prog - i * 0.055) / 0.34);
+    const warn = c.status !== 'nominal';
+    return `<div class="card ${warn ? 'warn' : ''}" style="padding:18px 21px;
+        opacity:${easeOut(k).toFixed(3)};transform:translateY(${((1-easeOut(k))*14).toFixed(1)}px)">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font-size:20px;color:var(--text-strong);font-weight:500">${c.name}</span>
+        <span class="score ${warn ? 'amber' : ''}" style="font-size:31px;margin-left:auto">${c.score}</span>
+      </div>
+      <div class="crole" style="margin-top:3px">${c.role}</div>
+      <div class="bar" style="margin-top:12px"><i class="${warn ? 'amber' : ''}"
+           style="width:${(c.score * cl(k * 1.2)).toFixed(0)}%"></i></div>
+    </div>`;
+  }).join('');
+
+  const trends = [['restingHR', 'var(--accent-2)'], ['hrv', 'var(--info-cyan)'],
+                  ['radiationDaily', 'var(--alert-amber)']].map(([key, col], i) => {
+    const k = cl((prog - 0.26 - i * 0.06) / 0.40);
+    const m = D.indicatorMeta[key], s = D.series[key];
+    return `<div class="card" style="padding:19px 22px;opacity:${easeOut(k).toFixed(3)}">
+      <div class="klabel" style="margin-bottom:9px">${m.label}</div>
+      ${sparkline(s, 520, 104, col, k, true)}
+      <div class="kdelta" style="margin-top:8px">${fmt(s[s.length-1].v, m.decimals)} ${m.unit} · 60-day trend</div>
+    </div>`;
+  }).join('');
+
+  const c = D.crew[3], vk = cl((prog - 0.52) / 0.40);
+  return header('Crew health overview', DAYLINE()) +
+    `<div class="eyebrow">Daily composite health score</div>
+     <div class="grid4">${cards}</div>
+     <div class="eyebrow" style="margin:30px 0 15px">Crew-mean indicator trends</div>
+     <div class="grid3">${trends}</div>
+     <div class="anom" style="margin-top:26px;padding:20px 26px;opacity:${easeOut(vk).toFixed(3)};
+          transform:translateY(${((1-easeOut(vk))*14).toFixed(1)}px)">
+       <div style="display:flex;align-items:center;gap:20px">
+         <span class="tag" style="color:var(--alert-amber);border-color:rgba(200,146,72,.5)">Signal Veil</span>
+         <span style="font-size:20px;color:var(--text-strong)">
+           ${c.drivers.length} indicators moving together — ${c.name}</span>
+         <span style="margin-left:auto;font-size:18px;color:var(--alert-amber)">${c.drivers[0]}</span>
+       </div>
+     </div>`;
+}
+
+// --- indicators --------------------------------------------------------
+function screenMonitor(prog) {
+  const picks = [
+    ['restingHR', 'restingHR', 'var(--accent-2)'],
+    ['hrv', 'hrv', 'var(--info-cyan)'],
+    ['sleepDuration', 'sleepDuration', 'var(--screen-glow)'],
+    ['stress', 'stress', 'var(--muted)'],
+    ['systolicBP', 'systolicBP', 'var(--accent)'],
+    ['radiationDaily', 'radiationDaily', 'var(--alert-amber)'],
+  ];
+  const cards = picks.map(([key, mk, col], i) => {
+    const k = cl((prog - i * 0.055) / 0.55);
+    const m = D.indicatorMeta[mk], s = D.series[key], last = s[s.length - 1].v;
+    // The series are crew means, so the comparison has to be the crew-mean
+    // baseline too, not any one astronaut's.
+    const bs = D.crew.map(c => c.baseline[key]).filter(v => v !== undefined);
+    const base = bs.length === D.crew.length ? bs.reduce((a, b) => a + b, 0) / bs.length : undefined;
+    const delta = base !== undefined ? last - base : null;
+    return `<div class="card" style="opacity:${easeOut(k).toFixed(3)}">
+      <div class="klabel">${m.short}</div>
+      <div><span class="kpi">${fmt(last, m.decimals)}</span><span class="kunit">${m.unit}</span></div>
+      ${sparkline(s, 400, 86, col, k, true)}
+      ${delta === null ? '' : `<div class="kdelta">${delta >= 0 ? '+' : '−'}${fmt(Math.abs(delta), m.decimals + 1)} ${m.unit} vs pre-flight</div>`}
+    </div>`;
+  }).join('');
+  return header('Indicator monitoring', DAYLINE()) +
+    `<div class="eyebrow">Crew-mean daily values · last 60 days</div><div class="grid3">${cards}</div>`;
+}
+
+// --- signal veil: the multi-signal pattern -----------------------------
+function screenVeil(prog) {
+  const c = D.crew[3];
+  const rows = c.drivers.map((d, i) => {
+    const k = cl((prog - 0.18 - i * 0.14) / 0.42);
+    return `<div style="display:flex;align-items:center;gap:20px;margin-top:17px;
+                 opacity:${easeOut(k).toFixed(3)}">
+      <span style="width:11px;height:11px;border-radius:50%;background:var(--alert-amber);flex:none"></span>
+      <span style="font-size:21px;color:var(--text-strong)">${d}</span>
+    </div>`;
+  }).join('');
+  const link = cl((prog - 0.45) / 0.45);
+  return header('Signal Veil', DAYLINE()) +
+    `<div class="eyebrow">Indicators moving together — ${c.name}</div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:6px">
+       <div class="card">
+         <div class="klabel">Resting heart rate</div>
+         ${sparkline(D.crewSeries[c.id], 760, 190, 'var(--alert-amber)', cl(prog / .7), true)}
+         <div class="kdelta amber">${fmt(c.today.restingHR)} bpm · baseline ${fmt(c.baseline.restingHR, 1)} bpm</div>
+       </div>
+       <div class="card">
+         <div class="klabel">Daily radiation dose</div>
+         ${sparkline(D.crewDose[c.id], 760, 190, 'var(--accent-2)', cl(prog / .7), true)}
+         <div class="kdelta">${fmt(c.today.radiationCumulative, 1)} mSv cumulative</div>
+       </div>
+     </div>
+     <div style="margin-top:26px;opacity:${easeOut(link).toFixed(3)}">${rows}</div>`;
+}
+
+// --- the anomaly AURORA actually detected ------------------------------
+function screenRisk(prog) {
+  const a = D.anomalies[0];
+  const names = a.astronautIds.map(id => (D.crew.find(c => c.id === id) || {}).callsign).filter(Boolean);
+  // Not every indicator an anomaly rule touches has display metadata
+  // (radiationCumulative is derived), so fall back to the raw key rather than
+  // dropping it: the film should show what the rule actually used.
+  const label = i => (D.indicatorMeta[i] || {}).short
+                  || i.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
+  const tags = a.indicators.map(label).concat(names);
+  return header('Risk detection', DAYLINE()) +
+    `<div class="eyebrow">Rule fired · ${a.ruleName} · days ${a.startDay}–${a.endDay}</div>
+     <div class="anom" style="opacity:${easeOut(cl(prog / .45)).toFixed(3)};
+          transform:translateY(${((1-easeOut(cl(prog/.45)))*18).toFixed(1)}px)">
+       <div class="atitle">${a.title}</div>
+       <div class="abody">${a.whatChanged}</div>
+       <div class="atags">
+         <span class="tag" style="color:var(--alert-amber);border-color:rgba(200,146,72,.5)">${a.severity}</span>
+         ${tags.map((t, i) => `<span class="tag" style="opacity:${easeOut(cl((prog - .3 - i*.055)/.4)).toFixed(2)}">${t}</span>`).join('')}
+       </div>
+     </div>
+     <div class="card" style="margin-top:26px;opacity:${easeOut(cl((prog-.35)/.5)).toFixed(3)}">
+       <div class="klabel">Why this fired</div>
+       <div class="abody" style="margin-top:9px">${a.why.split('. ')[0]}.</div>
+     </div>`;
+}
+
+// --- mission timeline --------------------------------------------------
+function screenMission(prog) {
+  const M = D.mission, pct = (M.day / M.totalDays) * 100;
+  const marks = D.phases.map(p => `<span class="tlmark" style="left:${(p.start / M.totalDays * 100).toFixed(2)}%"></span>`).join('');
+  const evs = D.events.map((e, i) => {
+    const k = cl((prog - .25 - i * .09) / .4);
+    return `<div class="card" style="opacity:${easeOut(k).toFixed(3)};padding:19px 22px">
+      <div class="klabel" style="margin-bottom:8px">Day ${e.day}</div>
+      <div style="font-size:19px;color:var(--text-strong);line-height:1.35">${e.title}</div></div>`;
+  }).join('');
+  return header('Mission context', DAYLINE()) +
+    `<div class="eyebrow">${M.designation}</div>
+     <div class="tl"><i style="width:${(pct * cl(prog / .5)).toFixed(2)}%"></i>${marks}
+       <span class="tlnow" style="left:${pct.toFixed(2)}%;opacity:${easeOut(cl((prog-.4)/.35)).toFixed(2)}"></span></div>
+     <div class="tllab"><span>Launch</span><span>${M.phase || D.phase}</span><span>Day ${M.totalDays}</span></div>
+     <div class="eyebrow" style="margin:40px 0 15px">Operational events in the current window</div>
+     <div class="grid4">${evs}</div>`;
+}
+
+// ================================================================= TEXT
+// [from, to, class, html, mode]  mode 'low' drops it under the interface.
+const TITLES = [
+  [ 2.30,  4.92, 't-hook',  'WHEN EVERY SECOND MATTERS...', 'mid', .90, .42],
+  // Low, because this line runs over the monitoring screen at 0:07.7 and a
+  // centred title would sit straight on top of the measurements.
+  [ 5.55,  9.42, 't-prob',  'ASTRONAUT HEALTH CAN\'T BE LEFT TO CHANCE.', 'low', .60, .34],
+  [11.05, 14.62, 't-intro', 'INTRODUCING AURORA.', 'mid', .75, .50],
+  [15.12, 16.92, 't-feat',  'MONITOR.', 'low', .30, .26],
+  [17.12, 18.92, 't-feat',  'CONNECT THE SIGNALS.', 'low', .30, .26],
+  [19.12, 20.92, 't-feat',  'UNDERSTAND THE RISKS.', 'low', .30, .26],
+  [21.12, 22.92, 't-feat',  'SUPPORT THE MISSION.', 'low', .30, .26],
+  [23.45, 26.58, 't-pay',   'Because protecting the crew<br>starts with understanding their health.', 'mid', .85, .55],
+];
+
+function paintText(t) {
+  let best = null, bo = 0;
+  for (const T of TITLES) { const o = band(t, T[0], T[1], T[5], T[6]); if (o > bo) { bo = o; best = T; } }
+  if (!best || bo <= 0.002) { textIn.style.opacity = 0; scrim.style.opacity = 0; return; }
+
+  scrim.style.opacity = (bo * 0.9).toFixed(3);
+  scrim.style.background = best[4] === 'low'
+    ? 'linear-gradient(to bottom, transparent 52%, rgba(0,0,0,.30) 72%, rgba(0,0,0,.72) 100%)'
+    : 'radial-gradient(ellipse 62% 42% at 50% 50%, rgba(0,0,0,.62), rgba(0,0,0,.30) 55%, transparent 80%)';
+
+  textIn.className = best[2];
+  textIn.innerHTML = best[3];
+  textEl.className = best[4] === 'low' ? 'low' : '';
+  const k = cl((t - best[0]) / (best[1] - best[0]));
+  // Titles settle rather than appear: they drift a little and resolve out of
+  // a slight blur, which is what stops type reading as a slide.
+  const drift = best[2] === 't-feat' ? 14 : 26;
+  const scale = 1 + (best[2] === 't-intro' ? .030 : .014) * (1 - easeOut(cl(bo)));
+  textIn.style.opacity = bo.toFixed(3);
+  textIn.style.filter = `blur(${((1 - bo) * (best[2] === 't-feat' ? 5 : 9)).toFixed(2)}px)`;
+  textIn.style.transform =
+    `translateY(${((1 - easeOut(cl(k * 3))) * drift - k * drift * .35).toFixed(2)}px) scale(${scale.toFixed(4)})`;
+}
+
+// ================================================================= FRAME
+window.renderFrame = function (n) {
+  if (!D) return;
+  const t = n / FPS;
+
+  paintPlates(n);
+
+  // ---- which interface, and how far drawn in
+  let build = null;
+  // The problem beat is the same monitoring screen the montage shows later,
+  // but pushed in hard and cropped, so it reads as a glance at a display
+  // rather than as the product shot it becomes at 0:15.
+  // Both of these used to start at nothing and build over a second, which
+  // meant the cut at 0:07.7 landed on an empty frame and the bass hit at 0:10
+  // landed on a nearly empty one. The glance at a display starts most of the
+  // way drawn, because it is a screen that has been running all along; the
+  // reveal still builds, but fast enough to be there when the hit lands.
+  if      (n >= 230 && n < 270) build = ['monitor', 0.55 + (n - 230) / 55, 1];
+  else if (n >= 300 && n < 450) build = ['reveal',  (n - 297) / 26, 0];
+  // Same reasoning for every montage beat: each gets two seconds at most, and
+  // one that starts from nothing spends the first third of its time empty.
+  // These are screens that have been running all along, so they come up
+  // already populated and finish assembling on camera.
+  else if (n >= 450 && n < 510) build = ['monitor', 0.50 + (n - 450) / 44, 0];
+  else if (n >= 540 && n < 570) build = ['veil',    0.50 + (n - 540) / 36, 0];
+  else if (n >= 570 && n < 630) build = ['risk',    0.45 + (n - 570) / 44, 0];
+  else if (n >= 660 && n < 690) build = ['mission', 0.50 + (n - 660) / 36, 0];
+  else if (n >= 690 && n < 720) build = ['crew',    1, 0];
+
+  if (build) {
+    const [kind, rawProg, compact] = build;
+    const prog = cl(rawProg);
+    inner.innerHTML = kind === 'crew'    ? screenCrew(prog, compact)
+                    : kind === 'reveal'  ? screenReveal(prog)
+                    : kind === 'monitor' ? screenMonitor(prog)
+                    : kind === 'veil'    ? screenVeil(prog)
+                    : kind === 'risk'    ? screenRisk(prog)
+                    :                      screenMission(prog);
+
+    // The screen arrives with a short push and resolves out of defocus: the
+    // match between the push-in plate ending at 10.0 s and the interface
+    // opening on the same move is the reveal.
+    let op = 1, sc = 1, bl = 0;
+    if (n >= 230 && n < 270) {             // problem: a glance at a display
+      // A hard cut, not a fade. Fading the interface up from nothing after
+      // the plate has already cut out leaves a fifth of a second of black in
+      // the middle of the fastest section of the film.
+      op = band(t, 230 / 30 - .02, 270 / 30 + .02, .035, .035);
+      sc = 1.16 - .07 * easeOut(cl((n - 230) / 34));   // cropped in
+    } else if (n >= 300 && n < 450) {      // the reveal
+      // Starting at zero opacity put four black frames on the single most
+      // important cut in the film, with the bass hit landing on nothing. The
+      // interface now arrives already present and resolves out of blur.
+      const a = cl((n - 297) / 11);
+      op = (0.18 + 0.82 * easeOut(a)) * band(t, 9.9, 15.04, .02, .13);
+      sc = 1.085 - .085 * easeOut(cl((n - 300) / 30));
+      bl = (1 - easeOut(a)) * 11;
+    } else {
+      const seg = n >= 690 ? [690, 720] : n >= 660 ? [660, 690] : n >= 570 ? [570, 630]
+                : n >= 540 ? [540, 570] : [450, 510];
+      // Beats that butt straight against a plate cut (0:18 and 0:22) are hard
+      // cuts for the same reason; the two that follow another interface beat
+      // can afford a short dissolve.
+      const soft = (seg[0] === 570 || seg[0] === 690);
+      op = band(t, seg[0] / 30 - .04, seg[1] / 30 + .04,
+                soft ? .17 : .035, soft ? .15 : .035);
+      sc = 1.022 - .022 * easeOut(cl((n - seg[0]) / 24));
+    }
+    screenEl.style.opacity = cl(op).toFixed(3);
+    screenEl.style.transform = `scale(${sc.toFixed(4)})`;
+    screenEl.style.filter = bl > .02 ? `blur(${bl.toFixed(2)}px)` : 'none';
+
+    // The analysis sweep runs down the interface once, during the reveal.
+    const sw = band(t, 10.25, 11.85, .18, .30);
+    sweep.style.opacity = sw.toFixed(3);
+    sweep.style.top = ((cl((t - 10.25) / 1.6)) * 1300 - 230).toFixed(0) + 'px';
+    // Glass sheen drifts slowly across every interface shot.
+    sheen.style.transform = `translateX(${(-260 + (t % 6) * 95).toFixed(0)}px)`;
+  } else {
+    screenEl.style.opacity = 0;
+    sweep.style.opacity = 0;
+  }
+
+  paintText(t);
+
+  // ---- brand card
+  const bo = n >= 811 ? 1 : 0;
+  brand.style.opacity = bo.toFixed(3);
+  if (bo > 0) {
+    const k = cl((t - 27.05) / 2.2);
+    const ls = 0.40 - 0.06 * easeOut(cl(k * 2.6));
+    $('bWord').style.letterSpacing = ls + 'em';
+    $('bWord').style.textIndent = ls + 'em';
+    $('bWord').style.opacity = cl(.1 + easeOut(cl(k * 5)) * .9).toFixed(3);
+    $('bRule').style.width = (easeOut(cl((k - .10) * 2.4)) * 660).toFixed(0) + 'px';
+    $('bTag').style.opacity = easeOut(cl((k - .20) * 2.6)).toFixed(3);
+    $('bChal').style.opacity = easeOut(cl((k - .42) * 2.6)).toFixed(3);
+    $('brandGlow').style.opacity = (0.35 + 0.65 * easeOut(cl(k * 3))).toFixed(3);
+  }
+
+  // ---- vignette: tight and anxious through the problem, open at the payoff
+  const tight = band(t, 5.4, 10.1, 2.2, 0.7);
+  const inner_r = 40 - tight * 13, outer_r = 108 - tight * 24;
+  const strength = (0.62 + tight * 0.22).toFixed(2);
+  vig.style.background =
+    `radial-gradient(ellipse 78% 86% at 50% 48%, transparent ${inner_r}%, rgba(0,0,0,${strength}) ${outer_r}%)`;
+
+  // ---- dips to black: the cut inside at 3.33 s, and the hole before the brand
+  let f = 0;
+  if (n >= 96 && n < 104)  f = 1 - Math.abs(n - 100) / 4.5;   // brief dip at the cut inside
+  if (n >= 802 && n < 812) f = Math.max(f, 1 - Math.abs(n - 807) / 4.6);
+  if (n < 6)   f = Math.max(f, 1 - n / 6);                    // open from black
+  if (n > 893) f = Math.max(f, (n - 893) / 8);                // and close to it
+  fade.style.opacity = cl(f).toFixed(3);
+};
+</script></body></html>

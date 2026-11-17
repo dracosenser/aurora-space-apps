@@ -40,7 +40,16 @@ with sync_playwright() as pw:
         path = OUT / f'{n:04d}.png'
         if path.exists() and not TEST:
             continue
-        pg.evaluate('(n) => window.renderFrame(n)', n)
+        # Swapping an <img> src is not instant: without waiting for the decode
+        # the capture can land on the previous plate, or on nothing at all.
+        pg.evaluate("""async (n) => {
+            window.renderFrame(n);
+            const imgs = [...document.querySelectorAll('img.plate')]
+                .filter(i => i.getAttribute('src') && i.style.opacity !== '0');
+            await Promise.all(imgs.map(i => i.complete ? Promise.resolve()
+                                                       : i.decode().catch(() => {})));
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        }""", n)
         pg.screenshot(path=str(path), type='png')
         done += 1
         if done % 60 == 0:
